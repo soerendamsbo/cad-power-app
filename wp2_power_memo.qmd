@@ -1,0 +1,557 @@
+---
+title: "WP2 DeclareDesign Power Example"
+format:
+  typst:
+    papersize: a4
+    margins: 1in
+execute:
+  echo: true
+  freeze: auto
+  warning: false
+  message: false
+---
+
+This document is the standalone version of the WP2 power example. It replaces
+the separate R script and keeps the analysis, explanation, and executable code
+in one place.
+
+## Purpose
+
+WP2 is a survey-embedded communication experiment among Danish citizens living
+in coastal or high flood-risk areas. The planned panel has 4,000 respondents
+interviewed twice during the year. Half are assigned to communication
+treatments featuring facts and policy information framed around themes such as
+community, solidarity, identities, flooding, climate adaptation, and shared
+responsibility. The other half are assigned to control.
+
+The relevant outcomes are support for climate policy and democratic attitudes:
+trust in democracy, civil society, and local communities. The main goal of this
+example is to show how a DeclareDesign power analysis can be built around those
+assumptions.
+
+## Effect-Size Prior
+
+The example uses standardized treatment effects because the final WP2 outcome
+scale is not fixed. It also creates a derived 1-5 observed index so the same
+design can be inspected on a Likert-style scale.
+
+The main simulation grid is:
+
+```{r}
+#| label: tau-preview
+tau_grid <- c(0.05, 0.10, 0.15, 0.20, 0.25, 0.30)
+```
+
+The reading of the three background papers was:
+
+- Ballew et al. supports a conservative range around `0.10-0.25 SD` for
+  communication-relevant predictors, but those are observational associations,
+  not randomized treatment effects.
+- Sinclair et al. supports a planning range around `0.10-0.30 SD`, with
+  `0.20 SD` as a reasonable intervention anchor for intention-type outcomes.
+- Goldwert et al. also supports `0.10`, `0.20`, and `0.30 SD` sensitivity
+  cases, while warning that effects vary substantially by outcome, ideology,
+  attrition, and multiple-testing choices.
+
+The interpretation should therefore be cautious: `0.20 SD` is a defensible
+main example, `0.10 SD` is a modest-effect case, and `0.30 SD` is optimistic.
+The `0.05 SD` case is included because democratic trust outcomes may be harder
+to move than immediate climate-action intentions.
+
+## Setup
+
+The script uses DeclareDesign, fabricatr, randomizr, estimatr, marginaleffects,
+dplyr, and ggplot2. The seed is fixed for reproducibility.
+
+```{r}
+#| label: setup
+#| echo: true
+#| output: false
+library(DeclareDesign)
+library(fabricatr)
+library(randomizr)
+library(dplyr)
+library(ggplot2)
+
+set.seed(20260413)
+```
+
+## Design Knobs
+
+The panel version of the example assumes a baseline-to-follow-up correlation.
+Higher stability means baseline adjustment gives more precision. The attrition
+grid is included because even a short panel can lose respondents between waves.
+
+```{r}
+#| label: design-knobs
+#| cache: false
+#| output: false
+# Planned total panel sample size (wave 1)
+N <- 4000
+
+# Default treatment effect for single-design runs; grid used in diagnosis
+tau <- 0.10
+tau_grid <- c(0.05, 0.08, 0.10, 0.15, 0.20)  # SD units (standardised outcome)
+
+# Test-retest correlation: Pearson r between wave-1 and wave-2 potential outcome
+# under no treatment. Bounded [-1, 1]; plausible range for attitude outcomes ~0.2-0.6.
+# Determines how much variance the baseline covariate absorbs in ANCOVA.
+rho_y <- 0.40
+rho_grid <- c(0.20, 0.40, 0.60)
+
+# Sample sizes for the N-sensitivity analysis
+N_grid <- c(1000, 2000, 4000)
+
+# Probability of non-response at wave 2 (non-differential by default)
+attrition_rate <- 0.30
+# Additional attrition probability for treated units (0 = no differential attrition)
+differential_attrition <- 0.00
+
+# Number of simulations per design cell. Raise to 500+ for a final run.
+sims <- 500
+```
+
+## Helper Functions
+
+The latent outcome is mapped to a simple 1-5 Likert-style scale so the same
+design can be inspected on both a standardized and an ordinal-looking metric.
+
+```{r}
+#| label: helpers
+#| cache: false
+#| output: false
+latent_to_likert <- function(x) {
+  as.integer(cut(
+    x,
+    breaks = c(-Inf, -1.2, -0.35, 0.35, 1.2, Inf),
+    labels = FALSE
+  ))
+}
+
+diagnosands_power <- declare_diagnosands(
+  power = mean(p.value < 0.05, na.rm = TRUE),
+  bias = mean(estimate - estimand, na.rm = TRUE),
+  rmse = sqrt(mean((estimate - estimand)^2, na.rm = TRUE)),
+  coverage = mean(
+    conf.low <= estimand & conf.high >= estimand,
+    na.rm = TRUE
+  ),
+  mean_estimate = mean(estimate, na.rm = TRUE),
+  mean_estimand = mean(estimand, na.rm = TRUE),
+  mean_se = mean(std.error, na.rm = TRUE),
+  type_s_error = mean(
+    p.value < 0.05 & sign(estimate) != sign(estimand),
+    na.rm = TRUE
+  )
+)
+
+```
+
+## Data-Generating Model
+
+The simulated population includes basic demographic variation, ideology, and a
+binary climate concern indicator. The untreated follow-up outcome is correlated
+with baseline outcome, and treatment shifts the follow-up potential outcome.
+
+```{r}
+#| label: model
+#| cache: false
+#| output: false
+model_wp2 <- declare_model(
+  N = N,
+  gender = factor(
+    sample(c("Woman", "Man"), N, replace = TRUE, prob = c(0.51, 0.49))
+  ),
+  age_group = factor(
+    sample(
+      c("18-34", "35-54", "55+"),
+      N,
+      replace = TRUE,
+      prob = c(0.28, 0.35, 0.37)
+    )
+  ),
+  education = factor(
+    sample(
+      c("Low", "Medium", "High"),
+      N,
+      replace = TRUE,
+      prob = c(0.25, 0.45, 0.30)
+    )
+  ),
+  ideology3 = factor(
+    sample(
+      c("Left", "Center", "Right"),
+      N,
+      replace = TRUE,
+      prob = c(0.34, 0.33, 0.33)
+    )
+  ),
+  climate_high = rbinom(
+    N,
+    1,
+    ifelse(ideology3 == "Left", 0.72, ifelse(ideology3 == "Center", 0.55, 0.38))
+  ),
+  climate_concern_high = factor(
+    ifelse(climate_high == 1, "Higher concern", "Lower concern")
+  ),
+  baseline_mu =
+    0.20 * (gender == "Woman") +
+    0.15 * (age_group == "55+") +
+    0.10 * (education == "High") +
+    0.35 * (ideology3 == "Left") -
+    0.25 * (ideology3 == "Right") +
+    0.45 * climate_high,
+  Y_pre_raw = baseline_mu + rnorm(N),
+  Y_pre_latent = as.numeric(scale(Y_pre_raw)),
+  post_shock = rnorm(N),
+  Y0_latent = rho_y * Y_pre_latent + sqrt(1 - rho_y^2) * post_shock,
+  tau_i = tau +
+    0.03 * climate_high -
+    0.02 * (ideology3 == "Right"),
+  Y_latent_Z_0 = Y0_latent,
+  Y_latent_Z_1 = Y0_latent + tau_i,
+  Y_1_5_Z_0 = latent_to_likert(Y_latent_Z_0),
+  Y_1_5_Z_1 = latent_to_likert(Y_latent_Z_1)
+)
+```
+
+## Inquiries, Assignment, and Measurement
+
+The estimands are the average treatment effects on the latent scale and on the
+coarsened 1-5 scale. Treatment is assigned 50/50. The measurement step reveals
+the realized outcomes.
+
+```{r}
+#| label: inquiries-assignment-measurement
+#| output: false
+inquiries_wp2 <- declare_inquiry(
+  ATE_latent = mean(Y_latent_Z_1 - Y_latent_Z_0),
+  ATE_1_5 = mean(Y_1_5_Z_1 - Y_1_5_Z_0)
+)
+
+assignment_wp2 <- declare_assignment(
+  Z = complete_ra(N = N, prob = 0.5)
+)
+
+measurement_wp2 <- declare_measurement(
+  Y_latent = reveal_outcomes(Y_latent ~ Z),
+  Y_1_5 = reveal_outcomes(Y_1_5 ~ Z)
+)
+```
+
+## Attrition
+
+The attrition block simulates wave-2 response probability and then filters the
+analysis sample to respondents only.
+
+```{r}
+#| label: attrition
+#| cache: false
+#| output: false
+attrition_wp2 <- declare_measurement(
+  responds_post = rbinom(
+    N,
+    1,
+    plogis(
+      qlogis(1 - attrition_rate) -
+        differential_attrition * Z +
+        0.15 * climate_high -
+        0.10 * (education == "Low")
+    )
+  ),
+  filter = responds_post == 1
+)
+```
+
+## Estimators
+
+The example compares a post-only estimator with a baseline-adjusted panel
+estimator. Both use `lm` (OLS, IID standard errors).
+
+```{r}
+#| label: estimators
+#| cache: false
+#| output: false
+post_only_estimators <-
+  declare_estimator(
+    Y_latent ~ Z,
+    .method = lm,
+    inquiry = "ATE_latent",
+    term = "Z",
+    label = "post_only_latent"
+  ) +
+  declare_estimator(
+    Y_1_5 ~ Z,
+    .method = lm,
+    inquiry = "ATE_1_5",
+    term = "Z",
+    label = "post_only_1_5"
+  )
+
+panel_estimators <-
+  declare_estimator(
+    Y_latent ~ Z + Y_pre_latent,
+    .method = lm,
+    inquiry = "ATE_latent",
+    term = "Z",
+    label = "baseline_adjusted_latent"
+  ) +
+  declare_estimator(
+    Y_1_5 ~ Z + Y_pre_latent,
+    .method = lm,
+    inquiry = "ATE_1_5",
+    term = "Z",
+    label = "baseline_adjusted_1_5"
+  )
+```
+
+## Designs
+
+Two designs are compared: post-only and a baseline-adjusted panel with 20%
+attrition.
+
+```{r}
+#| label: designs
+#| cache: false
+#| output: false
+design_post_only <-
+  model_wp2 +
+  inquiries_wp2 +
+  assignment_wp2 +
+  measurement_wp2 +
+  post_only_estimators
+
+design_panel <-
+  model_wp2 +
+  inquiries_wp2 +
+  assignment_wp2 +
+  measurement_wp2 +
+  attrition_wp2 +
+  panel_estimators
+```
+
+## Diagnosis
+
+The `redesign()` calls vary the treatment effect, outcome stability, and sample
+size across both designs. The diagnosis table is the main output for a power
+assessment.
+
+```{r}
+#| label: diagnosis
+#| cache: false
+post_only_grid <- redesign(
+  design_post_only,
+  tau = tau_grid,
+  rho_y = rho_grid,
+  N = N_grid
+)
+
+panel_grid <- redesign(
+  design_panel,
+  tau = tau_grid,
+  rho_y = rho_grid,
+  N = N_grid
+)
+
+diagnosis_post_only <- diagnose_designs(
+  post_only_grid,
+  diagnosands = diagnosands_power,
+  sims = sims,
+  bootstrap_sims = FALSE
+)
+
+diagnosis_panel <- diagnose_designs(
+  panel_grid,
+  diagnosands = diagnosands_power,
+  sims = sims,
+  bootstrap_sims = FALSE
+)
+
+diagnosis_results <- bind_rows(
+  diagnosis_post_only$diagnosands_df |>
+    mutate(scenario = "post_only"),
+  diagnosis_panel$diagnosands_df |>
+    mutate(scenario = "panel_with_attrition")
+)
+
+```
+
+## Plots
+
+All plots focus on the latent standardized outcome.
+
+```{r}
+#| label: plot-power
+#| echo: false
+#| fig-cap: "Statistical power by true effect size (SD units) and sample size, at rho_y = 0.40. Dashed line marks 80% power. Panel design includes 30% attrition and baseline covariate adjustment."
+latent_results <- diagnosis_results |>
+  filter(grepl("latent", estimator))
+
+main_results <- latent_results |>
+  filter(rho_y == 0.40)
+
+power_plot <- main_results |>
+  ggplot(aes(x = tau, y = power, color = estimator, group = estimator)) +
+  geom_hline(yintercept = 0.80, linetype = "dashed", color = "grey50") +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~ N, labeller = label_both) +
+  scale_y_continuous(limits = c(0, 1)) +
+  labs(
+    x = "True treatment effect, SD units",
+    y = "Power",
+    color = "Estimator"
+  ) +
+  theme_minimal()
+
+print(power_plot)
+```
+
+```{r}
+#| label: plot-coverage
+#| echo: false
+#| fig-cap: "95% CI coverage by true effect size and sample size, at rho_y = 0.40. Dashed line marks the nominal 0.95 level. Sustained deviations indicate SE miscalibration."
+coverage_plot <- main_results |>
+  ggplot(aes(x = tau, y = coverage, color = estimator, group = estimator)) +
+  geom_hline(yintercept = 0.95, linetype = "dashed", color = "grey50") +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~ N, labeller = label_both) +
+  scale_y_continuous(limits = c(0, 1)) +
+  labs(
+    x = "True treatment effect, SD units",
+    y = "Coverage (nominal 95%)",
+    color = "Estimator"
+  ) +
+  theme_minimal()
+
+print(coverage_plot)
+```
+
+```{r}
+#| label: plot-bias
+#| echo: false
+#| fig-cap: "Bias (mean estimate minus estimand) by true effect size and sample size, at rho_y = 0.40. Dashed line at zero. Non-zero bias in a randomised design signals a DGP or estimator misspecification."
+bias_plot <- main_results |>
+  ggplot(aes(x = tau, y = bias, color = estimator, group = estimator)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~ N, labeller = label_both) +
+  labs(
+    x = "True treatment effect, SD units",
+    y = "Bias",
+    color = "Estimator"
+  ) +
+  theme_minimal()
+
+print(bias_plot)
+```
+
+## Interpretation
+
+```{r}
+#| label: results
+#| output: false
+target_tau <- 0.10
+target_rho <- 0.40
+
+# Power and coverage at the main planning assumption (N = 4000)
+target_N <- 4000
+
+key <- diagnosis_results |>
+  filter(grepl("latent", estimator), tau == target_tau, rho_y == target_rho,
+         N == target_N)
+
+po_power    <- key |> filter(scenario == "post_only")            |> pull(power)    |> round(2)
+panel_power <- key |> filter(scenario == "panel_with_attrition") |> pull(power)    |> round(2)
+po_cov      <- key |> filter(scenario == "post_only")            |> pull(coverage) |> round(2)
+panel_cov   <- key |> filter(scenario == "panel_with_attrition") |> pull(coverage) |> round(2)
+
+# MDE: smallest tau reaching 80% power at rho = 0.60, N = 4000
+mde_at <- function(sc) {
+  v <- diagnosis_results |>
+    filter(grepl("latent", estimator), scenario == sc, rho_y == target_rho,
+           N == target_N, power >= 0.80) |>
+    arrange(tau) |>
+    slice(1) |>
+    pull(tau)
+  if (length(v) == 0) paste0(">", max(tau_grid)) else as.character(v)
+}
+
+mde_po    <- mde_at("post_only")
+mde_panel <- mde_at("panel_with_attrition")
+
+# Power gain from panel at target effect
+power_gain <- round(panel_power - po_power, 2)
+
+# Breakeven rho: panel beats post-only iff rho > sqrt(attrition_rate)
+breakeven_rho <- round(sqrt(attrition_rate), 2)
+
+# Coverage deviation from nominal
+po_cov_dev    <- round(abs(po_cov    - 0.95), 2)
+panel_cov_dev <- round(abs(panel_cov - 0.95), 2)
+```
+
+This is an example design, not a final power analysis. Numbers reported here
+update automatically when `sims` is increased.
+
+**Effect-size anchor.** The main planning assumption is `tau = 0.10 SD` with
+outcome stability `rho_y = 0.40` and N = 4000. At these values, the post-only
+design reaches power `r po_power` and the baseline-adjusted panel (with 30%
+attrition) reaches power `r panel_power` — a gain of `r power_gain` percentage
+points from adjusting for the pre-test.
+
+**Minimum detectable effect.** At `rho_y = 0.60`, the smallest effect where
+power first exceeds 80% is `r mde_po` SD for the post-only design and
+`r mde_panel` SD for the panel. The panel MDE is lower because the
+pre-test covariate absorbs outcome variance.
+
+**Sensitivity to outcome stability.** The `rho_y` grid (0.20, 0.40, 0.60)
+spans the range from weakly to moderately correlated waves. The power advantage
+of the panel over post-only grows with `rho_y`: when pre-post correlation is
+high, the baseline covariate explains more residual variance and the panel
+gains more precision.
+
+**Attrition and breakeven.** The panel design builds in 30% attrition with
+modest educational and climate-concern gradients. Attrition reduces effective N
+but does not induce bias here (`differential_attrition = 0`). The panel design
+gains efficiency over post-only only when `rho_y > sqrt(attrition_rate)`,
+i.e., `rho_y >` `r breakeven_rho`. Below this threshold the sample loss from
+attrition outweighs the variance reduction from the baseline covariate. With
+30% attrition the breakeven is `r breakeven_rho`, meaning the panel advantage
+is modest at `rho_y = 0.60` and absent at `rho_y = 0.20` and `rho_y = 0.40`. Differential
+attrition would require separate sensitivity
+analysis.
+
+**Coverage.** At the target effect and `rho_y = 0.60`, 95% CI coverage is
+`r po_cov` (post-only) and `r panel_cov` (panel), deviating from nominal
+by `r po_cov_dev` and `r panel_cov_dev` respectively. Deviations larger than
+0.03–0.05 would warrant investigation of SE calibration.
+
+## Running
+
+Install the needed R packages:
+
+```{r}
+#| label: install
+#| eval: false
+install.packages(c(
+  "DeclareDesign", "fabricatr", "randomizr",
+  "dplyr", "ggplot2"
+))
+```
+
+Then render the document or source the code in an R environment that has
+DeclareDesign installed.
+
+## Sources
+
+- `cad_short.pdf`, WP2 section.
+- `Ballew et al. - 2022 - Changing minds about global warming vicarious exp.pdf`
+- `Sinclair et al. - 2024 - Behavioral Interventions Motivate Action to Address Climate Change.pdf`
+- `Goldwert et al. - 2026 - A megastudy of behavioral interventions to catalyze public, political, and financial climate advocac.pdf`
+- DeclareDesign documentation: <https://declaredesign.org/r/declaredesign/>
+- `declare_estimator()` documentation:
+  <https://declaredesign.org/r/declaredesign/reference/declare_estimator.html>
+
