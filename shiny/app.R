@@ -60,7 +60,12 @@ for (nm in c(
   "treat_prob",
   "tau_flood",
   "tau_interaction",
-  "flood_response_boost"
+  "flood_response_boost",
+  "J",
+  "p_comm_flooded",
+  "p_indiv_given_comm",
+  "tau_community",
+  "tau_individual"
 )) {
   if (!nm %in% names(results)) {
     results[[nm]] <- NA_real_
@@ -121,6 +126,27 @@ flood_boost_vals <- meta_or_col(
   "flood_response_boost",
   default = c(0.05, 0.10)
 )
+J_vals <- meta_or_col("J_grid", "J", default = c(100, 200))
+p_comm_flooded_vals <- meta_or_col(
+  "p_comm_flooded_grid",
+  "p_comm_flooded",
+  default = c(0.10, 0.20)
+)
+p_indiv_vals <- meta_or_col(
+  "p_indiv_grid",
+  "p_indiv_given_comm",
+  default = c(0.40)
+)
+tau_community_vals <- meta_or_col(
+  "tau_community_grid",
+  "tau_community",
+  default = c(-0.10, -0.05)
+)
+tau_individual_vals <- meta_or_col(
+  "tau_individual_grid",
+  "tau_individual",
+  default = c(-0.05)
+)
 sims_used <- if (!is.null(grid_meta$sims)) grid_meta$sims else NA_integer_
 precompute_ts <- if (!is.null(grid_meta$timestamp)) {
   format(grid_meta$timestamp, "%Y-%m-%d %H:%M")
@@ -139,7 +165,12 @@ n_cells <- results |>
     treat_prob,
     tau_flood,
     tau_interaction,
-    flood_response_boost
+    flood_response_boost,
+    J,
+    p_comm_flooded,
+    p_indiv_given_comm,
+    tau_community,
+    tau_individual
   ) |>
   nrow()
 
@@ -148,8 +179,12 @@ DESIGN_LABELS <- vapply(DESIGN_REGISTRY, function(x) x$label, character(1))
 DESIGN_CHOICES <- setNames(DESIGN_TYPES, DESIGN_LABELS)
 DESIGN_LABEL_LOOKUP <- setNames(DESIGN_LABELS, DESIGN_TYPES)
 CUSTOM_WAVE_CHOICES <- c(
-  "Waves = 1 (post only)" = "wp3_post_only",
-  "Waves = 2 (pre-post)" = "wp3_panel"
+  "Waves = 1 (post only)" = "post_only",
+  "Waves = 2 (pre-post)" = "panel"
+)
+CUSTOM_DESIGN_TYPE_ORDER <- c(
+  "wp3_community_post_only",
+  "wp3_community_panel"
 )
 
 # ── Plotting helpers ──────────────────────────────────────────────────────────
@@ -163,7 +198,12 @@ FACET_CHOICES <- c(
   "Survey experiment assignment probability" = "treat_prob",
   "Flooding effect" = "tau_flood",
   "Flood x Survey interaction" = "tau_interaction",
-  "Flood retention boost" = "flood_response_boost"
+  "Flood retention boost" = "flood_response_boost",
+  "Number of communities (J)" = "J",
+  "Flooded community share" = "p_comm_flooded",
+  "Individual flooding rate within flooded communities" = "p_indiv_given_comm",
+  "Community flooding effect" = "tau_community",
+  "Individual flooding effect" = "tau_individual"
 )
 
 FACET_LABELS <- c(
@@ -175,7 +215,12 @@ FACET_LABELS <- c(
   treat_prob = "Survey experiment assignment probability",
   tau_flood = "Flooding effect",
   tau_interaction = "Flood x Survey interaction",
-  flood_response_boost = "Flood retention boost"
+  flood_response_boost = "Flood retention boost",
+  J = "J",
+  p_comm_flooded = "Flooded community share",
+  p_indiv_given_comm = "Individual flooding rate",
+  tau_community = "Community flooding effect",
+  tau_individual = "Individual flooding effect"
 )
 
 WP3_EFFECT_LABELS <- c(
@@ -228,19 +273,101 @@ wp3_effect_grid_ui <- function(prefix, height = "300px") {
     h4("Conditional effects"),
     h5("Survey experiment effects"),
     fluidRow(
-      column(6, plotOutput(paste0(prefix, "_survey_when_not_flooded"), height = height)),
-      column(6, plotOutput(paste0(prefix, "_survey_when_flooded"), height = height))
+      column(
+        6,
+        plotOutput(paste0(prefix, "_survey_when_not_flooded"), height = height)
+      ),
+      column(
+        6,
+        plotOutput(paste0(prefix, "_survey_when_flooded"), height = height)
+      )
     ),
     h5("Flooding effects"),
     fluidRow(
-      column(6, plotOutput(paste0(prefix, "_flood_when_survey_control"), height = height)),
-      column(6, plotOutput(paste0(prefix, "_flood_when_survey_treated"), height = height))
+      column(
+        6,
+        plotOutput(
+          paste0(prefix, "_flood_when_survey_control"),
+          height = height
+        )
+      ),
+      column(
+        6,
+        plotOutput(
+          paste0(prefix, "_flood_when_survey_treated"),
+          height = height
+        )
+      )
     ),
     tags$hr(),
     h4("Contrasts"),
     fluidRow(
-      column(6, plotOutput(paste0(prefix, "_survey_flood_contrast"), height = height)),
-      column(6, plotOutput(paste0(prefix, "_flood_survey_contrast"), height = height))
+      column(
+        6,
+        plotOutput(paste0(prefix, "_survey_flood_contrast"), height = height)
+      ),
+      column(
+        6,
+        plotOutput(paste0(prefix, "_flood_survey_contrast"), height = height)
+      )
+    )
+  )
+}
+
+effect_output_id <- function(prefix, effect_term) {
+  paste0(prefix, "_", gsub("[^A-Za-z0-9_]", "_", effect_term))
+}
+
+wp3_community_effect_grid_ui <- function(prefix, height = "300px") {
+  tagList(
+    h4("Primary effects"),
+    fluidRow(
+      column(
+        4,
+        plotOutput(
+          effect_output_id(prefix, "Z"),
+          height = height
+        )
+      ),
+      column(
+        4,
+        plotOutput(
+          effect_output_id(prefix, "community_flooded"),
+          height = height
+        )
+      ),
+      column(
+        4,
+        plotOutput(
+          effect_output_id(prefix, "individual_flooded"),
+          height = height
+        )
+      )
+    ),
+    tags$hr(),
+    h4("Combined and diagnostic effects"),
+    fluidRow(
+      column(
+        4,
+        plotOutput(
+          effect_output_id(prefix, "total_direct_effect_latent"),
+          height = height
+        )
+      ),
+      column(
+        4,
+        plotOutput(
+          effect_output_id(prefix, "Z:community_flooded"),
+          height = height
+        )
+      ),
+      column(
+        4,
+        plotOutput(
+          effect_output_id(prefix, "Z:individual_flooded"),
+          height = height
+        )
+      )
     )
   )
 }
@@ -265,7 +392,12 @@ is_valid_number <- function(x) {
   length(x) == 1 && is.numeric(x) && is.finite(x)
 }
 
-effect_size_helper_value <- function(raw_effect, outcome_sd, scale_min, scale_max) {
+effect_size_helper_value <- function(
+  raw_effect,
+  outcome_sd,
+  scale_min,
+  scale_max
+) {
   if (!is_valid_number(raw_effect)) {
     return(NA_real_)
   }
@@ -302,23 +434,28 @@ custom_memory_columns <- function() {
     "design_type",
     "N",
     "tau",
-    "tau_flood",
-    "tau_interaction",
+    "J",
+    "p_comm_flooded",
+    "p_indiv_given_comm",
+    "tau_community",
+    "tau_individual",
     "rho_y",
     "attrition_rate",
     "differential_attrition",
-    "flood_exposure_rate",
     "treat_prob",
     "flood_response_boost",
     "sims",
-    paste0("power_", WP3_EFFECT_ORDER)
+    paste0("power_", WP3_COMMUNITY_EFFECT_ORDER)
   )
 }
 
 empty_custom_memory <- function() {
   out <- as.data.frame(
-    setNames(replicate(length(custom_memory_columns()), logical(0), simplify = FALSE),
-             custom_memory_columns())
+    setNames(
+      replicate(length(custom_memory_columns()), logical(0), simplify = FALSE),
+      custom_memory_columns()
+    ),
+    check.names = FALSE
   )
   character_cols <- c("saved_at", "csv_file", "waves", "design_type")
   out[character_cols] <- lapply(out[character_cols], as.character)
@@ -345,7 +482,10 @@ read_custom_memory <- function(memory_dir) {
   }
 
   rows <- lapply(files, function(path) {
-    out <- tryCatch(read.csv(path, stringsAsFactors = FALSE), error = function(e) NULL)
+    out <- tryCatch(
+      read.csv(path, stringsAsFactors = FALSE, check.names = FALSE),
+      error = function(e) NULL
+    )
     if (is.null(out)) {
       return(NULL)
     }
@@ -371,28 +511,66 @@ next_custom_simulation_id <- function(memory) {
   as.integer(max(memory$simulation_id, na.rm = TRUE) + 1L)
 }
 
-custom_memory_rows <- function(results, simulation_id, saved_at, csv_file, sims) {
-  param <- function(col) unique(stats::na.omit(results[[col]]))[1]
+custom_design_types_from_inputs <- function(waves) {
+  if (is.null(waves)) {
+    return(character(0))
+  }
 
-  dplyr::bind_rows(lapply(c("wp3_post_only", "wp3_panel"), function(dtype) {
+  out <- character(0)
+  if ("post_only" %in% waves) {
+    out <- c(out, "wp3_community_post_only")
+  }
+  if ("panel" %in% waves) {
+    out <- c(out, "wp3_community_panel")
+  }
+
+  intersect(CUSTOM_DESIGN_TYPE_ORDER, out)
+}
+
+custom_memory_rows <- function(
+  results,
+  simulation_id,
+  saved_at,
+  csv_file,
+  sims
+) {
+  dplyr::bind_rows(lapply(CUSTOM_DESIGN_TYPE_ORDER, function(dtype) {
+    effect_order <- if (startsWith(dtype, "wp3_community")) {
+      WP3_COMMUNITY_EFFECT_ORDER
+    } else {
+      WP3_EFFECT_ORDER
+    }
     d <- results |>
       filter(
         design_type == dtype,
         outcome_scale == "Latent SD",
-        term %in% WP3_EFFECT_ORDER
+        term %in% effect_order
       )
     if (nrow(d) == 0) {
       return(NULL)
     }
+    param <- function(col) {
+      if (!col %in% names(d)) {
+        return(NA_real_)
+      }
+      vals <- unique(stats::na.omit(d[[col]]))
+      if (length(vals) == 0) {
+        return(NA_real_)
+      }
+      vals[1]
+    }
 
-    powers <- setNames(
-      as.list(rep(NA_real_, length(WP3_EFFECT_ORDER))),
-      paste0("power_", WP3_EFFECT_ORDER)
+    community_powers <- setNames(
+      as.list(rep(NA_real_, length(WP3_COMMUNITY_EFFECT_ORDER))),
+      paste0("power_", WP3_COMMUNITY_EFFECT_ORDER)
     )
-    for (effect_term in WP3_EFFECT_ORDER) {
+    for (effect_term in effect_order) {
       val <- d$power[d$term == effect_term]
       if (length(val) > 0) {
-        powers[[paste0("power_", effect_term)]] <- val[1]
+        target <- paste0("power_", effect_term)
+        if (target %in% names(community_powers)) {
+          community_powers[[target]] <- val[1]
+        }
       }
     }
 
@@ -402,21 +580,29 @@ custom_memory_rows <- function(results, simulation_id, saved_at, csv_file, sims)
           simulation_id = simulation_id,
           saved_at = saved_at,
           csv_file = csv_file,
-          waves = ifelse(dtype == "wp3_post_only", "Waves = 1", "Waves = 2"),
+          waves = dplyr::case_when(
+            dtype == "wp3_post_only" ~ "Waves = 1",
+            dtype == "wp3_panel" ~ "Waves = 2",
+            dtype == "wp3_community_post_only" ~ "Community waves = 1",
+            dtype == "wp3_community_panel" ~ "Community waves = 2",
+            TRUE ~ dtype
+          ),
           design_type = dtype,
           N = param("N"),
           tau = param("tau"),
-          tau_flood = param("tau_flood"),
-          tau_interaction = param("tau_interaction"),
+          J = param("J"),
+          p_comm_flooded = param("p_comm_flooded"),
+          p_indiv_given_comm = param("p_indiv_given_comm"),
+          tau_community = param("tau_community"),
+          tau_individual = param("tau_individual"),
           rho_y = param("rho_y"),
           attrition_rate = param("attrition_rate"),
           differential_attrition = param("differential_attrition"),
-          flood_exposure_rate = param("flood_exposure_rate"),
           treat_prob = param("treat_prob"),
           flood_response_boost = param("flood_response_boost"),
           sims = sims
         ),
-        powers
+        community_powers
       ),
       check.names = FALSE
     )
@@ -433,12 +619,37 @@ filter_subtitle <- function(fv, input) {
       kv(fv != "N", "N = ", input$filter_N),
       kv(fv != "rho_y", "ρ = ", input$filter_rho),
       kv(fv != "attrition_rate", "attr = ", input$filter_attrition),
-      kv(fv != "differential_attrition", "survey retention penalty = ", input$filter_diff),
+      kv(
+        fv != "differential_attrition",
+        "survey retention penalty = ",
+        input$filter_diff
+      ),
       kv(fv != "flood_exposure_rate", "flood = ", input$filter_flood_rate),
-      kv(fv != "treat_prob", "p(survey experiment) = ", input$filter_treat_prob),
+      kv(
+        fv != "treat_prob",
+        "p(survey experiment) = ",
+        input$filter_treat_prob
+      ),
       kv(fv != "tau_flood", "tau_flood = ", input$filter_tau_flood),
       kv(fv != "tau_interaction", "int = ", input$filter_tau_interaction),
-      kv(fv != "flood_response_boost", "flood retention boost = ", input$filter_flood_boost)
+      kv(
+        fv != "flood_response_boost",
+        "flood retention boost = ",
+        input$filter_flood_boost
+      ),
+      kv(fv != "J", "J = ", input$filter_J),
+      kv(
+        fv != "p_comm_flooded",
+        "p_comm_flooded = ",
+        input$filter_p_comm_flooded
+      ),
+      kv(fv != "p_indiv_given_comm", "p_indiv = ", input$filter_p_indiv),
+      kv(fv != "tau_community", "tau_community = ", input$filter_tau_community),
+      kv(
+        fv != "tau_individual",
+        "tau_individual = ",
+        input$filter_tau_individual
+      )
     )
   )
   if (length(parts) == 0) {
@@ -466,29 +677,28 @@ interp_power <- tags$details(
   ),
   tags$p(
     strong("What is on the x-axis:"),
-    " In the WP3 plots, the x-axis changes with the estimand: survey-effect
-    plots use tau, flooding-effect plots use tau_flood, and contrast plots use
-    tau_interaction."
+    " In the community plots, survey-effect panels use tau, community-flooding
+    panels use tau_community, and individual-flooding panels use tau_individual."
   ),
   tags$p(
     strong("How to compare designs:"),
-    " WP2 estimators target survey experiment effects only.
-    WP3 estimators target survey, flood, and interaction effects. Interaction
-    estimators are usually hardest to power because information is split across
-    four cells in Z x flooded."
+    " Post-only and panel variants are shown for the same community-level DGP.
+    The primary comparison is whether the design can detect the survey effect,
+    the community flooding effect, and the supplementary individual flooding
+    effect."
   ),
   tags$p(
     strong("Main power drivers:"),
     " Larger N, larger absolute effect size,
-    higher rho_y (for panel), and less attrition increase power. For WP3,
-    flood_exposure_rate and treat_prob also matter because they determine cell
-    balance and effective information for main and interaction terms."
+    higher rho_y (for panel), and less attrition increase power. For the
+    community design, J, p_comm_flooded, p_indiv_given_comm, and treat_prob also
+    determine effective information."
   ),
   tags$p(
     strong("Interpretation tip:"),
-    " If one estimator is underpowered while others
-    are acceptable, that is expected in WP3: interaction power can lag even when
-    main effects have adequate power."
+    " Community flooding power depends heavily on the number of flooded
+    communities; individual flooding power depends on the number of directly
+    flooded respondents inside those communities."
   )
 )
 
@@ -511,9 +721,9 @@ interp_coverage <- tags$details(
   ),
   tags$p(
     strong("Where risk is higher:"),
-    " Coverage problems are more likely in small-N
-    settings, high-attrition panel settings, and sparse WP3 interaction cells
-    (for example low flood prevalence combined with imbalanced treatment split)."
+    " Coverage problems are more likely in small-N settings, high-attrition
+    panel settings, and sparse community designs with few flooded communities
+    or few individually flooded respondents."
   ),
   tags$p(
     strong("Practical response:"),
@@ -540,45 +750,17 @@ interp_bias_rmse <- tags$details(
     In many scenarios, RMSE differences are driven more by variance than bias."
   ),
   tags$p(
-    strong("WP3-specific note:"),
-    " Interaction estimators can have noticeably larger
-    RMSE than main-effect estimators, especially with low flood prevalence, because
-    each interaction contrast relies on fewer effective observations."
+    strong("Community-design note:"),
+    " RMSE can differ sharply across the three primary effects because the
+    survey effect uses the full randomized sample, the community effect is
+    between communities, and the individual effect is within flooded
+    communities."
   ),
   tags$p(
     strong("Attrition note:"),
     " In panel designs, differential response can induce
     estimand drift from the enrolled sample to the responder sample. This is a
     substantive design issue, not only a statistical one."
-  )
-)
-
-interp_mde <- tags$details(
-  open = "open",
-  tags$summary(strong(
-    "How to read the MDE table — and what it means for the study"
-  )),
-  tags$br(),
-  tags$p(
-    strong("What MDE means here:"),
-    " For each estimator and design, MDE is the
-    smallest survey-treatment effect tau in the simulated grid that reaches 80% power."
-  ),
-  tags$p(
-    strong("Important limitation:"),
-    " This MDE is conditional on current flood and
-    interaction assumptions. Changing flood prevalence, flood effect, or interaction
-    magnitude can shift MDE substantially in WP3."
-  ),
-  tags$p(
-    strong("How to read '>':"),
-    " A '>' marker means 80% power was not reached within
-    the available tau grid. Expand the tau grid or treat the scenario as underpowered."
-  ),
-  tags$p(
-    strong("Planning use:"),
-    " Use MDE comparatively: identify which design-estimator
-    pair is most efficient under the assumptions you consider plausible."
   )
 )
 
@@ -673,6 +855,28 @@ methods_content <- tagList(
       "."
     ),
     tags$li(
+      "The WP3 community design assigns ",
+      tags$code("N"),
+      " individuals to ",
+      tags$code("J"),
+      " communities, draws community flooding as ",
+      tags$code("Bernoulli(p_comm_flooded)"),
+      ", and draws individual flooding only within flooded
+      communities using ",
+      tags$code("p_indiv_given_comm"),
+      "."
+    ),
+    tags$li(
+      "Community-design potential outcomes are additive in survey treatment,
+      community flooding, and individual flooding. The DGP has no
+      nonzero ",
+      tags$code("Z x community"),
+      " or ",
+      tags$code("Z x individual"),
+      " effect in this version; those interaction coefficients are retained as
+      diagnostics rather than assigned nonzero target estimands."
+    ),
+    tags$li(
       "Observed Likert outcome is a coarsened 1-5 transform of the latent outcome."
     )
   ),
@@ -734,7 +938,34 @@ methods_content <- tagList(
     tags$li(strong("WP3 post-only:"), tags$code("Y ~ Z * flooded")),
     tags$li(strong("WP3 panel:"), tags$code("Y ~ Z * flooded + Y_pre_latent")),
     tags$li(
-      "All estimators are OLS with IID standard errors in the current implementation."
+      strong("WP3 community post-only:"),
+      tags$code(
+        "lm_robust(Y ~ Z * community_flooded + Z * individual_flooded, clusters = community_id, se_type = 'CR2')"
+      )
+    ),
+    tags$li(
+      strong("WP3 community panel:"),
+      tags$code(
+        "lm_robust(Y ~ Z * community_flooded + Z * individual_flooded + Y_pre_latent, clusters = community_id, se_type = 'CR2')"
+      )
+    ),
+    tags$li(
+      "WP2 and standard WP3 estimators use OLS with IID standard errors. The
+      community design uses community-clustered CR2 standard errors for all
+      terms because IID standard errors would be invalid under the hierarchical
+      exposure process."
+    ),
+    tags$li(
+      "Effective N differs by estimand in the community design: community effects
+      depend on the number of flooded communities, while individual flooding
+      effects depend on individually flooded respondents inside flooded
+      communities."
+    ),
+    tags$li(
+      "The individual flooding coefficient targets the incremental flooding
+      effect conditional on community flooding, ",
+      tags$code("tau_individual"),
+      ", not a prevalence-weighted population-average burden."
     )
   ),
   h4("Pre-computed parameter grids"),
@@ -830,7 +1061,9 @@ methods_content <- tagList(
       "Flood exposure is currently modeled as a Bernoulli indicator with fixed prevalence, not as a geospatial process with spillovers or measurement error."
     ),
     tags$li(
-      "IID OLS standard errors are used. If heteroskedasticity or clustering is expected, robust/clustered variants should be added as separate design types."
+      "IID OLS standard errors are used for WP2 and standard WP3. The community
+      WP3 design is the clustered variant and uses CR2 standard errors at the
+      community level."
     ),
     tags$li(
       "Panel estimators target effects among observed wave-2 respondents when attrition is non-ignorable."
@@ -850,96 +1083,157 @@ preliminary_findings_content <- tagList(
   h3("Preliminary Findings"),
   tags$hr(),
   tags$p(
-    "These findings are provisional and scenario-dependent. They combine
-    qualitative expectations from the model with a quick targeted simulation
-    snapshot (40 simulations per cell) intended as first-pass guidance."
+    "These findings are based on a full parameter sweep of 9,072 design cells",
+    " (1,296 WP3 community post-only + 7,776 WP3 community panel) with",
+    " 500 simulations per cell (4,536,000 total simulations).",
+    " All results below use the latent-SD scale.",
+    " Medians are taken over all non-highlighted parameters within each grouping",
+    " unless otherwise noted."
   ),
   h4("Quick simulation snapshot"),
   tags$ul(
     tags$li(
-      strong("Flooding main-effect power (latent scale):"),
-      " Median power is low in both one-wave and two-wave WP3 designs under the tested range (post-only median ~0.10; panel median ~0.15)."
+      strong("Survey effect (Z) power:"),
+      " The easiest estimand to detect.",
+      " Post-only median power: N = 2,000 → 0.813, N = 4,000 → 0.967,",
+      " N = 6,000 → 0.996. Panel adds very little (+0.020 median gain).",
+      " All tested N values provide adequate survey-effect power."
     ),
     tags$li(
-      strong("Is flooding effect sufficiently powered?"),
-      " First impression: generally no, not for small-to-moderate flood effects in this quick sweep."
+      strong("Community flooding effect power:"),
+      " The binding constraint for most realistic designs.",
+      " Post-only crosses 0.80 only at N = 6,000 with p_comm_flooded = 0.40",
+      " (median 0.882); at p_comm_flooded = 0.20, N = 6,000 post-only reaches",
+      " only 0.751. Panel raises this substantially: at p_comm_flooded = 0.20,",
+      " N = 4,000 panel achieves 0.695 / 0.782 / 0.921 at",
+      " rho_y = 0.40 / 0.60 / 0.80.",
+      " At p_comm_flooded = 0.40, N = 4,000 panel reaches 0.971 (all rho)."
     ),
     tags$li(
-      strong("How much do two waves help?"),
-      " Panel minus post-only median gain for flooding-effect power is about +0.025, with wide spread (roughly -0.05 to +0.175 across tested conditions)."
+      strong("Individual flooding effect power:"),
+      " Severely underpowered except under the most favourable parameter",
+      " combination. The best cell in the grid — N = 6,000, panel,",
+      " p_comm_flooded = 0.40, p_indiv_given_comm = 0.30 — reaches 0.846.",
+      " At p_comm_flooded = 0.20 with p_indiv_given_comm = 0.30, N = 6,000",
+      " panel achieves only 0.564. Under p_comm_flooded ≤ 0.10, power stays",
+      " below 0.33 at any N. Treat this estimand as exploratory."
     ),
     tags$li(
-      strong("Interaction power remains hardest:"),
-      " Median power for WP3 interaction estimators is low (post-only ~0.063; panel ~0.075), with 80% power not reached in tested cells."
+      strong("Panel vs post-only gain (community flooding):"),
+      " Overall median gain is +0.100 (Q10: +0.008, Q90: +0.356).",
+      " The gain is substantial and grows sharply with rho_y",
+      " (+0.044 at rho_y = 0.40, +0.130 at rho_y = 0.60, +0.284 at rho_y = 0.80)."
     ),
     tags$li(
-      strong("Interpretation warning:"),
-      " These are coarse estimates from a low-cost sweep and should be treated as directional, not final."
+      strong("Interaction power (Z × community flooding,",
+             " Z × individual flooding):"),
+      " Median power ≈ 0.05 in both post-only and panel; maximum across the",
+      " full grid is 0.09. These terms are included as diagnostics; power here",
+      " is at the type I error rate. Treat all interaction tests as exploratory."
     )
   ),
   h4("Key levers for one-wave vs two-wave"),
   tags$ul(
     tags$li(
-      strong("Cross-wave correlation (rho_y):"),
-      " In the quick sweep, panel advantage is larger when rho_y is higher (median gain around +0.05 at rho_y = 0.6 vs +0.025 at rho_y = 0.2)."
+      strong("rho_y is the decisive lever for the panel advantage."),
+      " Median panel gain on community flooding rises from +0.044 at",
+      " rho_y = 0.40 to +0.130 at rho_y = 0.60 and +0.284 at rho_y = 0.80.",
+      " At rho_y ≥ 0.80, the panel design can achieve adequate community",
+      " flooding power at N = 4,000 even with p_comm_flooded = 0.20."
     ),
     tags$li(
-      strong("Attrition rate:"),
-      " Panel advantage shrinks as attrition increases (median gain ~+0.05 at 10% attrition vs ~+0.025 at 50% attrition)."
+      strong("p_comm_flooded is the primary lever for community flooding power;",
+             " J is nearly irrelevant."),
+      " Median community flooding power shifts by only ≈0.007 across",
+      " J = 300 to J = 1,200. Increasing the number of communities does not",
+      " substitute for increasing the share of flooded communities."
     ),
     tags$li(
-      strong("Flood prevalence:"),
-      " Raising flood_exposure_rate from 0.10 to 0.20 increased median panel flooding-effect power (~0.125 to ~0.188)."
+      strong("Attrition rate has negligible impact."),
+      " Median community flooding power is 0.787, 0.784, and 0.782 at",
+      " 10%, 30%, and 50% attrition — effectively flat."
     ),
     tags$li(
-      strong("Treatment proportion:"),
-      " Under tested values (0.50 vs 0.65), interaction-power medians were similar; more extreme imbalance may still be harmful and should be tested."
+      strong("Flood retention boost (flood_response_boost) is negligible."),
+      " Varying this parameter from 0 to 0.10 shifts median community",
+      " flooding power by < 0.001."
     )
   ),
-  h4("First-priority design implications"),
+  h4("Design implications"),
   tags$ul(
     tags$li(
-      strong("Flooding effect detectability is currently the bottleneck."),
-      " To move toward sufficient power, prioritize larger N, higher expected flood prevalence in-sample, and lower attrition."
+      strong("p_comm_flooded and N are the primary bottleneck levers."),
+      " Post-only requires p_comm_flooded ≥ 0.40 at N = 6,000 to cross 0.80",
+      " for community flooding. At p_comm_flooded = 0.20, no post-only design",
+      " in the tested grid achieves 0.80."
     ),
     tags$li(
-      strong(
-        "Two-wave design helps, but not enough alone in weak-signal scenarios."
-      ),
-      " Gains from panel adjustment are real but modest when attrition is high or rho_y is low."
+      strong("Panel design is essential when p_comm_flooded ≤ 0.20."),
+      " At p_comm_flooded = 0.20 and rho_y ≥ 0.80, a panel with N = 4,000",
+      " achieves 0.921. Below rho_y = 0.80 or with N = 2,000, even a panel",
+      " falls short. The panel’s value is concentrated in community flooding",
+      " power — it adds almost nothing for the survey effect (+0.020 gain)."
     ),
     tags$li(
-      strong("Interaction hypotheses are power-demanding by default."),
-      " Treat interaction tests as requiring stronger design support than main-effect tests."
+      strong("Individual flooding should be designated secondary/exploratory."),
+      " Only the most favourable combination (N = 6,000, panel,",
+      " p_comm_flooded = 0.40, p_indiv_given_comm = 0.30) achieves 0.846.",
+      " Any realistic constraint on p_comm_flooded or p_indiv_given_comm",
+      " drops individual flooding power well below 0.80."
+    ),
+    tags$li(
+      strong("Inflating J does not rescue flood-effect power."),
+      " J has negligible effect on all estimands. Sampling more communities",
+      " at the same p_comm_flooded yields essentially the same power.",
+      " Resources are better spent increasing N or targeting higher",
+      " flood-prevalence areas."
+    ),
+    tags$li(
+      strong("Interaction tests require treating as exploratory."),
+      " No design in this grid provides meaningful power for the",
+      " Z × community flooding or Z × individual flooding interactions",
+      " (max ≈0.09 across all cells)."
     )
   ),
   h4("Dimensions to explore next in Custom Simulation"),
   tags$ul(
     tags$li(
-      "Push N upward while keeping flood_exposure_rate low (0.05-0.15) to map realistic worst-case power."
+      "Test p_comm_flooded above 0.40 to determine whether post-only power",
+      " can be achieved at N = 4,000 or lower; the tested range is not yet",
+      " saturated at the top."
     ),
     tags$li(
-      "Vary rho_y and attrition jointly to identify breakeven regions where panel clearly outperforms post-only."
+      "Probe N between 4,000 and 6,000 at p_comm_flooded = 0.20 in the",
+      " panel design (rho_y = 0.60–0.80) to locate the precise",
+      " power-adequate threshold for community flooding."
     ),
     tags$li(
-      "Stress-test interaction signs and magnitudes, especially near zero where false negatives are most likely."
+      "Test p_indiv_given_comm above 0.30 to map the minimum combination",
+      " needed for reliable individual flooding power; this is the binding",
+      " constraint for that estimand."
     ),
     tags$li(
-      "Probe treatment split beyond 0.65 only if operationally feasible, and evaluate trade-offs across all estimands rather than one."
-    ),
-    tags$li(
-      "Test sensitivity to flood retention and survey experiment retention because responder-composition shifts can affect panel interpretation."
+      "If rho_y < 0.40 is plausible in the study context, test lower values",
+      " (e.g., 0.20–0.30); the panel advantage may diminish substantially",
+      " below the tested range."
     )
   ),
   h4("Caveat on these findings"),
   tags$p(
-    "The quick snapshot used a focused grid (N in {2000, 4000}, rho_y in {0.2, 0.6},
-    attrition in {0.1, 0.5} for panel, treat_prob in {0.5, 0.65},
-    flood_exposure_rate in {0.1, 0.2}, tau_flood in {-0.10, -0.05},
-    tau_interaction in {-0.04, 0.04}) with 40 simulations per cell. Use these
-    numbers for orientation, then verify with higher-simulation custom runs.
-    To refresh the snapshot reproducibly, run ",
-    tags$code("Rscript shiny/quick_findings_sweep.R"),
+    "Results come from a full community-design grid sweep:",
+    " N ∈ {2000, 4000, 6000},",
+    " tau ∈ {0.10, 0.20},",
+    " rho_y ∈ {0.40, 0.60, 0.80},",
+    " J ∈ {300, 600, 1200},",
+    " p_comm_flooded ∈ {0.10, 0.20, 0.40},",
+    " p_indiv_given_comm ∈ {0.10, 0.30},",
+    " tau_community ∈ {−0.10, −0.20},",
+    " tau_individual ∈ {−0.10, −0.20},",
+    " treat_prob = 0.50;",
+    " panel additionally varies attrition ∈ {0.10, 0.30, 0.50} and",
+    " flood_response_boost ∈ {0.00, 0.10}.",
+    " 500 simulations per cell. To reproduce, run ",
+    tags$code("Rscript shiny/precompute.R"),
     "."
   )
 )
@@ -1015,7 +1309,9 @@ precomputed_sidebar <- sidebar(
     choices = tau_vals,
     selected = 0.10
   ),
-  param_note("Used to hold the survey experiment effect fixed when another effect is on the x-axis."),
+  param_note(
+    "Used to hold the survey experiment effect fixed when another effect is on the x-axis."
+  ),
   conditionalPanel(
     condition = "input.facet_by !== 'rho_y'",
     selectInput(
@@ -1024,7 +1320,9 @@ precomputed_sidebar <- sidebar(
       choices = rho_vals,
       selected = 0.40
     ),
-    param_note("Correlation between baseline and follow-up outcomes; higher values make panel adjustment more useful.")
+    param_note(
+      "Correlation between baseline and follow-up outcomes; higher values make panel adjustment more useful."
+    )
   ),
   conditionalPanel(
     condition = "input.facet_by !== 'attrition_rate'",
@@ -1044,7 +1342,9 @@ precomputed_sidebar <- sidebar(
       choices = diff_vals,
       selected = 0.00
     ),
-    param_note("Log-odds penalty for follow-up response among survey experiment treated respondents; zero means no treatment-related retention difference.")
+    param_note(
+      "Log-odds penalty for follow-up response among survey experiment treated respondents; zero means no treatment-related retention difference."
+    )
   ),
   conditionalPanel(
     condition = "input.facet_by !== 'flood_exposure_rate'",
@@ -1064,7 +1364,9 @@ precomputed_sidebar <- sidebar(
       choices = treat_vals,
       selected = min(treat_vals)
     ),
-    param_note("Probability of assignment to the survey experiment treatment condition.")
+    param_note(
+      "Probability of assignment to the survey experiment treatment condition."
+    )
   ),
   conditionalPanel(
     condition = "input.facet_by !== 'tau_flood'",
@@ -1074,7 +1376,9 @@ precomputed_sidebar <- sidebar(
       choices = tau_flood_vals,
       selected = min(tau_flood_vals)
     ),
-    param_note("Effect of flood exposure on the outcome among survey experiment controls.")
+    param_note(
+      "Effect of flood exposure on the outcome among survey experiment controls."
+    )
   ),
   conditionalPanel(
     condition = "input.facet_by !== 'tau_interaction'",
@@ -1084,7 +1388,9 @@ precomputed_sidebar <- sidebar(
       choices = tau_int_vals,
       selected = min(tau_int_vals)
     ),
-    param_note("How much the survey experiment effect differs between flood-exposed and non-exposed respondents.")
+    param_note(
+      "How much the survey experiment effect differs between flood-exposed and non-exposed respondents."
+    )
   ),
   conditionalPanel(
     condition = "input.facet_by !== 'flood_response_boost'",
@@ -1094,7 +1400,73 @@ precomputed_sidebar <- sidebar(
       choices = flood_boost_vals,
       selected = if (0 %in% flood_boost_vals) 0 else min(flood_boost_vals)
     ),
-    param_note("Log-odds boost for follow-up response among flood-exposed respondents; negative values imply a retention penalty.")
+    param_note(
+      "Log-odds boost for follow-up response among flood-exposed respondents; negative values imply a retention penalty."
+    )
+  ),
+  conditionalPanel(
+    condition = "input.facet_by !== 'J'",
+    selectInput(
+      "filter_J",
+      "Number of communities (community WP3 only)",
+      choices = J_vals,
+      selected = if (200 %in% J_vals) 200 else max(J_vals)
+    ),
+    param_note(
+      "Number of communities used in the hierarchical flooding design."
+    )
+  ),
+  conditionalPanel(
+    condition = "input.facet_by !== 'p_comm_flooded'",
+    selectInput(
+      "filter_p_comm_flooded",
+      "Flooded community share (community WP3 only)",
+      choices = p_comm_flooded_vals,
+      selected = min(p_comm_flooded_vals)
+    ),
+    param_note("Probability that a community experiences flooding.")
+  ),
+  conditionalPanel(
+    condition = "input.facet_by !== 'p_indiv_given_comm'",
+    selectInput(
+      "filter_p_indiv",
+      "Individual flooding rate within flooded communities",
+      choices = p_indiv_vals,
+      selected = if (0.40 %in% p_indiv_vals) 0.40 else min(p_indiv_vals)
+    ),
+    param_note(
+      "Probability of individual flooding among respondents in flooded communities."
+    )
+  ),
+  conditionalPanel(
+    condition = "input.facet_by !== 'tau_community'",
+    selectInput(
+      "filter_tau_community",
+      "Community flooding effect (community WP3 only)",
+      choices = tau_community_vals,
+      selected = if (-0.10 %in% tau_community_vals) {
+        -0.10
+      } else {
+        min(tau_community_vals)
+      }
+    ),
+    param_note("Community-level flood effect in latent SD units.")
+  ),
+  conditionalPanel(
+    condition = "input.facet_by !== 'tau_individual'",
+    selectInput(
+      "filter_tau_individual",
+      "Individual flooding effect (community WP3 only)",
+      choices = tau_individual_vals,
+      selected = if (-0.05 %in% tau_individual_vals) {
+        -0.05
+      } else {
+        min(tau_individual_vals)
+      }
+    ),
+    param_note(
+      "Incremental individual flooding effect within flooded communities."
+    )
   ),
 
   tags$hr(),
@@ -1111,8 +1483,16 @@ dashboard_main <- navset_tab(
   id = "dashboard_tabs",
 
   nav_panel(
-    "Power curves",
-    wp3_effect_grid_ui("power"),
+    "Power",
+    div(
+      class = "alert alert-secondary",
+      tags$strong("Effective sample-size diagnostic: "),
+      "The community effect is identified between communities, so effective N
+      depends on the number of flooded communities. The individual flooding
+      effect is identified within flooded communities. This is why the two
+      flooding outputs can have very different precision under the same N."
+    ),
+    wp3_community_effect_grid_ui("community_power"),
     interp_power
   ),
 
@@ -1127,30 +1507,20 @@ dashboard_main <- navset_tab(
     accordion(
       accordion_panel(
         "Coverage",
-        wp3_effect_grid_ui("coverage", height = "240px"),
+        wp3_community_effect_grid_ui("community_coverage", height = "240px"),
         interp_coverage
       ),
       accordion_panel(
         "Bias",
-        wp3_effect_grid_ui("bias", height = "240px")
+        wp3_community_effect_grid_ui("community_bias", height = "240px")
       ),
       accordion_panel(
         "RMSE",
-        wp3_effect_grid_ui("rmse", height = "240px"),
+        wp3_community_effect_grid_ui("community_rmse", height = "240px"),
         interp_bias_rmse
       ),
       open = FALSE
     )
-  ),
-
-  nav_panel(
-    "MDE summary",
-    p(em(
-      "Minimum detectable survey-treatment effect: smallest tau (SD units) at which power \u2265 80%,
-      for each combination of N and design type, at current filter settings."
-    )),
-    tableOutput("mde_table"),
-    interp_mde
   )
 )
 
@@ -1275,7 +1645,9 @@ custom_panel <- fluidRow(
               max = 100,
               step = 0.01
             ),
-            param_note("Difference on the original outcome scale, such as Likert points."),
+            param_note(
+              "Difference on the original outcome scale, such as Likert points."
+            ),
             numericInput(
               "helper_outcome_sd",
               "Known outcome SD",
@@ -1323,8 +1695,8 @@ custom_panel <- fluidRow(
               column(
                 4,
                 actionButton(
-                  "use_helper_tau_flood",
-                  "Flood",
+                  "use_helper_tau_community",
+                  "Community",
                   icon = icon("arrow-right"),
                   class = "btn-outline-primary btn-sm w-100"
                 )
@@ -1332,14 +1704,16 @@ custom_panel <- fluidRow(
               column(
                 4,
                 actionButton(
-                  "use_helper_tau_interaction",
-                  "Interaction",
+                  "use_helper_tau_individual",
+                  "Individual",
                   icon = icon("arrow-right"),
                   class = "btn-outline-primary btn-sm w-100"
                 )
               )
             ),
-            param_note("Buttons copy the standardized value into the matching effect input below."),
+            param_note(
+              "Buttons copy the standardized value into the matching effect input below."
+            ),
             value = "effect-size-helper"
           ),
           open = FALSE
@@ -1352,25 +1726,9 @@ custom_panel <- fluidRow(
           max = 2,
           step = 0.01
         ),
-        param_note("Average effect of the embedded survey experiment, in latent SD units."),
-        numericInput(
-          "custom_tau_flood",
-          "Flooding effect (SD units)",
-          value = -0.05,
-          min = -2,
-          max = 2,
-          step = 0.01
+        param_note(
+          "Average effect of the embedded survey experiment, in latent SD units."
         ),
-        param_note("Effect of flood exposure on the outcome among survey experiment controls."),
-        numericInput(
-          "custom_tau_interaction",
-          "Survey experiment x flooding contrast (SD units)",
-          value = 0.04,
-          min = -2,
-          max = 2,
-          step = 0.01
-        ),
-        param_note("Difference between the survey experiment effect among flood-exposed and non-exposed respondents."),
         numericInput(
           "custom_rho",
           "Cross-wave correlation (\u03c1)",
@@ -1379,7 +1737,9 @@ custom_panel <- fluidRow(
           max = 1,
           step = 0.05
         ),
-        param_note("Correlation between baseline and follow-up outcomes; higher values make panel adjustment more useful."),
+        param_note(
+          "Correlation between baseline and follow-up outcomes; higher values make panel adjustment more useful."
+        ),
         numericInput(
           "custom_attr",
           "Attrition rate",
@@ -1388,7 +1748,9 @@ custom_panel <- fluidRow(
           max = 0.9,
           step = 0.05
         ),
-        param_note("Baseline probability of not completing the follow-up survey."),
+        param_note(
+          "Baseline probability of not completing the follow-up survey."
+        ),
         numericInput(
           "custom_diff",
           "Survey experiment retention penalty (log-odds)",
@@ -1397,16 +1759,62 @@ custom_panel <- fluidRow(
           max = 1,
           step = 0.05
         ),
-        param_note("Positive values lower follow-up response among survey experiment treated respondents; zero means no treatment-related retention difference."),
+        param_note(
+          "Positive values lower follow-up response among survey experiment treated respondents; zero means no treatment-related retention difference."
+        ),
+        tags$hr(),
+        h4("Community flooding inputs"),
         numericInput(
-          "custom_flood_rate",
-          "Flood exposure rate",
-          value = 0.10,
+          "custom_J",
+          "Number of communities",
+          value = 200,
+          min = 10,
+          max = 5000,
+          step = 10
+        ),
+        param_note(
+          "Number of communities in the hierarchical flooding design."
+        ),
+        numericInput(
+          "custom_p_comm_flooded",
+          "Share of flooded communities",
+          value = 0.15,
           min = 0,
           max = 1,
           step = 0.01
         ),
-        param_note("Share of respondents exposed to flooding between survey waves."),
+        param_note("Probability that a community experiences flooding."),
+        numericInput(
+          "custom_p_indiv",
+          "Individual flooding rate within flooded communities",
+          value = 0.40,
+          min = 0,
+          max = 1,
+          step = 0.01
+        ),
+        param_note(
+          "Probability of individual flooding among respondents in flooded communities."
+        ),
+        numericInput(
+          "custom_tau_community",
+          "Community flooding effect (SD units)",
+          value = -0.10,
+          min = -2,
+          max = 2,
+          step = 0.01
+        ),
+        param_note("Community-level flood effect in latent SD units."),
+        numericInput(
+          "custom_tau_individual",
+          "Individual flooding effect (SD units)",
+          value = -0.05,
+          min = -2,
+          max = 2,
+          step = 0.01
+        ),
+        param_note(
+          "Supplementary individual flooding effect within flooded communities."
+        ),
         numericInput(
           "custom_treat_prob",
           "Survey experiment assignment probability",
@@ -1415,7 +1823,9 @@ custom_panel <- fluidRow(
           max = 0.95,
           step = 0.01
         ),
-        param_note("Probability of assignment to the survey experiment treatment condition."),
+        param_note(
+          "Probability of assignment to the survey experiment treatment condition."
+        ),
         numericInput(
           "custom_flood_boost",
           "Flood retention boost (log-odds)",
@@ -1424,7 +1834,9 @@ custom_panel <- fluidRow(
           max = 1,
           step = 0.01
         ),
-        param_note("Positive values raise follow-up response among flood-exposed respondents; negative values lower it."),
+        param_note(
+          "Positive values raise follow-up response among flood-exposed respondents; negative values lower it."
+        ),
         numericInput(
           "custom_sims",
           "Simulations",
@@ -1440,7 +1852,9 @@ custom_panel <- fluidRow(
           choices = CUSTOM_WAVE_CHOICES,
           selected = unname(CUSTOM_WAVE_CHOICES)
         ),
-        param_note("Choose whether to diagnose a one-wave post-only design, a two-wave pre-post design, or both."),
+        param_note(
+          "Choose whether to diagnose a one-wave post-only design, a two-wave pre-post design, or both."
+        ),
         actionButton(
           "run_custom",
           "Run simulation",
@@ -1458,7 +1872,10 @@ custom_panel <- fluidRow(
       navset_tab(
         nav_panel(
           "Power",
-          wp3_effect_grid_ui("custom_power")
+          h4(
+            "Community design: survey, community flooding, individual flooding"
+          ),
+          wp3_community_effect_grid_ui("custom_community_power")
         ),
         nav_panel(
           "Diagnostics",
@@ -1470,15 +1887,33 @@ custom_panel <- fluidRow(
           accordion(
             accordion_panel(
               "Coverage",
-              wp3_effect_grid_ui("custom_coverage", height = "240px")
+              h4(
+                "Community design: survey, community flooding, individual flooding"
+              ),
+              wp3_community_effect_grid_ui(
+                "custom_community_coverage",
+                height = "240px"
+              )
             ),
             accordion_panel(
               "Bias",
-              wp3_effect_grid_ui("custom_bias", height = "240px")
+              h4(
+                "Community design: survey, community flooding, individual flooding"
+              ),
+              wp3_community_effect_grid_ui(
+                "custom_community_bias",
+                height = "240px"
+              )
             ),
             accordion_panel(
               "RMSE",
-              wp3_effect_grid_ui("custom_rmse", height = "240px")
+              h4(
+                "Community design: survey, community flooding, individual flooding"
+              ),
+              wp3_community_effect_grid_ui(
+                "custom_community_rmse",
+                height = "240px"
+              )
             ),
             open = FALSE
           )
@@ -1490,21 +1925,6 @@ custom_panel <- fluidRow(
     h4("Simulation memory"),
     uiOutput("custom_memory_status"),
     DTOutput("custom_memory_table")
-  )
-)
-
-# ── Numerical results panel ───────────────────────────────────────────────────
-
-numerical_panel <- tagList(
-  fluidRow(
-    column(
-      12,
-      p(
-        "Full numerical results for the pre-computed grid, filtered by the
-        current sidebar settings. Sort, search, and download as CSV."
-      ),
-      DTOutput("full_table")
-    )
   )
 )
 
@@ -1524,11 +1944,6 @@ ui <- page_navbar(
       sidebar = precomputed_sidebar,
       dashboard_main
     )
-  ),
-
-  nav_panel(
-    "Numerical Results",
-    div(class = "container-fluid mt-3", numerical_panel)
   ),
 
   nav_panel(
@@ -1563,10 +1978,7 @@ ui <- page_navbar(
       interp_coverage,
       tags$br(),
       h4("Bias & RMSE"),
-      interp_bias_rmse,
-      tags$br(),
-      h4("MDE"),
-      interp_mde
+      interp_bias_rmse
     )
   ),
 
@@ -1677,16 +2089,16 @@ server <- function(input, output, session) {
     updateNumericInput(session, "custom_tau", value = round(abs(val), 3))
   })
 
-  observeEvent(input$use_helper_tau_flood, {
+  observeEvent(input$use_helper_tau_community, {
     val <- helper_effect_sd()
     req(is.finite(val))
-    updateNumericInput(session, "custom_tau_flood", value = round(val, 3))
+    updateNumericInput(session, "custom_tau_community", value = round(val, 3))
   })
 
-  observeEvent(input$use_helper_tau_interaction, {
+  observeEvent(input$use_helper_tau_individual, {
     val <- helper_effect_sd()
     req(is.finite(val))
-    updateNumericInput(session, "custom_tau_interaction", value = round(val, 3))
+    updateNumericInput(session, "custom_tau_individual", value = round(val, 3))
   })
 
   # ── Reactive: filter pre-computed data ─────────────────────────────────────
@@ -1710,7 +2122,12 @@ server <- function(input, output, session) {
           "treat_prob",
           "tau_flood",
           "tau_interaction",
-          "flood_response_boost"
+          "flood_response_boost",
+          "J",
+          "p_comm_flooded",
+          "p_indiv_given_comm",
+          "tau_community",
+          "tau_individual"
         )
     ) {
       d <- filter(d, !is.na(.data[[fv]]))
@@ -1772,6 +2189,41 @@ server <- function(input, output, session) {
           flood_response_boost == as.numeric(input$filter_flood_boost)
       )
     }
+    if (fv != "J") {
+      d <- filter(
+        d,
+        is.na(J) |
+          J == as.numeric(input$filter_J)
+      )
+    }
+    if (fv != "p_comm_flooded") {
+      d <- filter(
+        d,
+        is.na(p_comm_flooded) |
+          p_comm_flooded == as.numeric(input$filter_p_comm_flooded)
+      )
+    }
+    if (fv != "p_indiv_given_comm") {
+      d <- filter(
+        d,
+        is.na(p_indiv_given_comm) |
+          p_indiv_given_comm == as.numeric(input$filter_p_indiv)
+      )
+    }
+    if (fv != "tau_community") {
+      d <- filter(
+        d,
+        is.na(tau_community) |
+          tau_community == as.numeric(input$filter_tau_community)
+      )
+    }
+    if (fv != "tau_individual") {
+      d <- filter(
+        d,
+        is.na(tau_individual) |
+          tau_individual == as.numeric(input$filter_tau_individual)
+      )
+    }
 
     d
   })
@@ -1797,6 +2249,18 @@ server <- function(input, output, session) {
   }
 
   # ── WP3 effect plots ────────────────────────────────────────────────────────
+
+  wp3_facet_vars <- c(
+    "N",
+    "rho_y",
+    "attrition_rate",
+    "differential_attrition",
+    "flood_exposure_rate",
+    "treat_prob",
+    "tau_flood",
+    "tau_interaction",
+    "flood_response_boost"
+  )
 
   wp3_effect_data <- function(effect_term) {
     x_var <- unname(WP3_EFFECT_X[[effect_term]])
@@ -1865,9 +2329,16 @@ server <- function(input, output, session) {
     d
   }
 
-  wp3_effect_plot <- function(effect_term, y_var, y_label, title_prefix,
-                              hline = NULL, hline_label = NULL,
-                              y_limits = NULL, percent_y = FALSE) {
+  wp3_effect_plot <- function(
+    effect_term,
+    y_var,
+    y_label,
+    title_prefix,
+    hline = NULL,
+    hline_label = NULL,
+    y_limits = NULL,
+    percent_y = FALSE
+  ) {
     x_var <- unname(WP3_EFFECT_X[[effect_term]])
     fv <- input$facet_by
     d <- wp3_effect_data(effect_term)
@@ -1928,24 +2399,32 @@ server <- function(input, output, session) {
       base_theme()
 
     if (!is.null(y_limits) || percent_y) {
-      p <- p + scale_y_continuous(
-        labels = if (percent_y) percent_format(accuracy = 1) else waiver()
-      )
+      p <- p +
+        scale_y_continuous(
+          labels = if (percent_y) percent_format(accuracy = 1) else waiver()
+        )
     }
     if (!is.null(y_limits)) {
       p <- p + coord_cartesian(ylim = y_limits)
     }
 
-    if (fv != x_var) {
+    if (fv != x_var && fv %in% wp3_facet_vars) {
       add_facet(p, fv)
     } else {
       p
     }
   }
 
-  register_wp3_effect_plots <- function(prefix, y_var, y_label, title_prefix,
-                                        hline = NULL, hline_label = NULL,
-                                        y_limits = NULL, percent_y = FALSE) {
+  register_wp3_effect_plots <- function(
+    prefix,
+    y_var,
+    y_label,
+    title_prefix,
+    hline = NULL,
+    hline_label = NULL,
+    y_limits = NULL,
+    percent_y = FALSE
+  ) {
     for (effect_term in WP3_EFFECT_ORDER) {
       local({
         effect_local <- effect_term
@@ -1966,167 +2445,304 @@ server <- function(input, output, session) {
   }
 
   register_wp3_effect_plots(
-    "power", "power", "Power", "Power:",
-    hline = 0.80, hline_label = "80% target",
-    y_limits = c(0, 1), percent_y = TRUE
+    "power",
+    "power",
+    "Power",
+    "Power:",
+    hline = 0.80,
+    hline_label = "80% target",
+    y_limits = c(0, 1),
+    percent_y = TRUE
   )
 
   register_wp3_effect_plots(
-    "coverage", "coverage", "95% CI coverage", "Coverage:",
-    hline = 0.95, hline_label = "95%",
-    y_limits = c(0.80, 1), percent_y = TRUE
+    "coverage",
+    "coverage",
+    "95% CI coverage",
+    "Coverage:",
+    hline = 0.95,
+    hline_label = "95%",
+    y_limits = c(0.80, 1),
+    percent_y = TRUE
   )
 
   register_wp3_effect_plots(
-    "bias", "bias", "Bias (estimate - estimand)", "Bias:",
+    "bias",
+    "bias",
+    "Bias (estimate - estimand)",
+    "Bias:",
     hline = 0
   )
 
   register_wp3_effect_plots(
-    "rmse", "rmse", "RMSE", "RMSE:"
+    "rmse",
+    "rmse",
+    "RMSE",
+    "RMSE:"
   )
 
-  # ── MDE table ────────────────────────────────────────────────────────────────
+  # ── WP3 community effect plots ─────────────────────────────────────────────
 
-  output$mde_table <- renderTable(
-    {
-      d <- plot_data()
-      req(nrow(d) > 0)
-
-      tau_max <- max(tau_vals)
-
-      d |>
-        group_by(N, design_label_display, estimator_label) |>
-        summarise(
-          MDE = {
-            hit <- tau[power >= 0.80]
-            if (length(hit) == 0) {
-              paste0(">", tau_max)
-            } else {
-              as.character(min(hit))
-            }
-          },
-          `Power at tau=0.10` = {
-            v <- power[abs(tau - 0.10) < 1e-9]
-            if (length(v) == 0) {
-              NA_character_
-            } else {
-              sprintf("%.1f%%", 100 * v[1])
-            }
-          },
-          `Power at tau=0.20` = {
-            v <- power[abs(tau - 0.20) < 1e-9]
-            if (length(v) == 0) {
-              NA_character_
-            } else {
-              sprintf("%.1f%%", 100 * v[1])
-            }
-          },
-          .groups = "drop"
-        ) |>
-        rename(
-          "Sample size" = N,
-          "Design" = design_label_display,
-          "Estimator" = estimator_label,
-          "MDE (80% power)" = MDE
-        )
-    },
-    striped = TRUE,
-    hover = TRUE,
-    bordered = TRUE,
-    na = "—"
+  community_facet_vars <- c(
+    "N",
+    "rho_y",
+    "attrition_rate",
+    "differential_attrition",
+    "treat_prob",
+    "flood_response_boost",
+    "J",
+    "p_comm_flooded",
+    "p_indiv_given_comm",
+    "tau_community",
+    "tau_individual"
   )
 
-  # ── Full numerical table (Numerical Results tab) ──────────────────────────
-
-  output$full_table <- renderDT({
-    d <- plot_data() |>
-      select(
-        N,
-        tau,
-        rho_y,
-        attrition_rate,
-        differential_attrition,
-        flood_exposure_rate,
-        treat_prob,
-        tau_flood,
-        tau_interaction,
-        flood_response_boost,
-        design_label_display,
-        estimator_label,
-        term,
-        inquiry,
-        outcome_scale,
-        power,
-        bias,
-        rmse,
-        coverage,
-        mean_se,
-        type_s_error
+  wp3_community_effect_data <- function(effect_term) {
+    x_var <- unname(WP3_COMMUNITY_EFFECT_X[[effect_term]])
+    d <- results |>
+      filter(
+        design_type %in%
+          c("wp3_community_post_only", "wp3_community_panel"),
+        outcome_scale == "Latent SD",
+        term == effect_term
       ) |>
-      rename(
-        "N" = N,
-        "tau (SD)" = tau,
-        "rho" = rho_y,
-        "Attrition" = attrition_rate,
-        "Survey retention penalty" = differential_attrition,
-        "Flood rate" = flood_exposure_rate,
-        "Survey assignment prob" = treat_prob,
-        "Flood effect (SD)" = tau_flood,
-        "Interaction (SD)" = tau_interaction,
-        "Flood retention boost" = flood_response_boost,
-        "Design" = design_label_display,
-        "Estimator" = estimator_label,
-        "Effect" = term,
-        "Inquiry" = inquiry,
-        "Scale" = outcome_scale,
-        "Power" = power,
-        "Bias" = bias,
-        "RMSE" = rmse,
-        "Coverage" = coverage,
-        "Mean SE" = mean_se,
-        "Type S error" = type_s_error
+      mutate(
+        design_variant = ifelse(
+          design_type == "wp3_community_post_only",
+          "Post-only",
+          "Panel"
+        )
       )
 
-    datatable(
+    fv <- input$facet_by
+
+    if (fv != "N") {
+      d <- filter(d, N == as.numeric(input$filter_N))
+    }
+    if (fv != "rho_y") {
+      d <- filter(d, rho_y == as.numeric(input$filter_rho))
+    }
+    if (fv != "attrition_rate") {
+      d <- filter(
+        d,
+        is.na(attrition_rate) |
+          attrition_rate == as.numeric(input$filter_attrition)
+      )
+    }
+    if (fv != "differential_attrition") {
+      d <- filter(
+        d,
+        is.na(differential_attrition) |
+          differential_attrition == as.numeric(input$filter_diff)
+      )
+    }
+    if (fv != "treat_prob") {
+      d <- filter(d, treat_prob == as.numeric(input$filter_treat_prob))
+    }
+    if (fv != "flood_response_boost") {
+      d <- filter(
+        d,
+        is.na(flood_response_boost) |
+          flood_response_boost == as.numeric(input$filter_flood_boost)
+      )
+    }
+    if (fv != "J") {
+      d <- filter(d, J == as.numeric(input$filter_J))
+    }
+    if (fv != "p_comm_flooded") {
+      d <- filter(
+        d,
+        p_comm_flooded == as.numeric(input$filter_p_comm_flooded)
+      )
+    }
+    if (fv != "p_indiv_given_comm") {
+      d <- filter(
+        d,
+        p_indiv_given_comm == as.numeric(input$filter_p_indiv)
+      )
+    }
+    if (x_var != "tau") {
+      d <- filter(d, tau == as.numeric(input$filter_tau))
+    }
+    if (x_var != "tau_community" && fv != "tau_community") {
+      d <- filter(
+        d,
+        tau_community == as.numeric(input$filter_tau_community)
+      )
+    }
+    if (x_var != "tau_individual" && fv != "tau_individual") {
+      d <- filter(
+        d,
+        tau_individual == as.numeric(input$filter_tau_individual)
+      )
+    }
+
+    d
+  }
+
+  wp3_community_effect_plot <- function(
+    effect_term,
+    y_var,
+    y_label,
+    title_prefix,
+    hline = NULL,
+    hline_label = NULL,
+    y_limits = NULL,
+    percent_y = FALSE
+  ) {
+    x_var <- unname(WP3_COMMUNITY_EFFECT_X[[effect_term]])
+    fv <- input$facet_by
+    d <- wp3_community_effect_data(effect_term)
+    req(nrow(d) > 0)
+
+    p <- ggplot(
       d,
-      filter = "top",
-      rownames = FALSE,
-      extensions = "Buttons",
-      options = list(
-        pageLength = 20,
-        dom = "Bfrtip",
-        buttons = list("csv", "excel"),
-        scrollX = TRUE,
-        columnDefs = list(list(className = "dt-center", targets = "_all"))
+      aes(
+        x = .data[[x_var]],
+        y = .data[[y_var]],
+        color = design_variant,
+        linetype = design_variant,
+        shape = design_variant,
+        group = design_variant
       )
-    ) |>
-      formatRound(
-        c("Power", "Bias", "RMSE", "Coverage", "Mean SE", "Type S error"),
-        digits = 3
-      ) |>
-      formatStyle(
-        "Power",
-        background = styleColorBar(c(0, 1), "#a8d5a2"),
-        backgroundSize = "98% 60%",
-        backgroundRepeat = "no-repeat",
-        backgroundPosition = "center"
-      ) |>
-      formatStyle(
-        "Coverage",
-        color = styleInterval(
-          c(0.90, 0.93, 0.97, 1.00),
-          c("red", "orange", "black", "orange", "red")
+    )
+
+    if (!is.null(hline)) {
+      p <- p +
+        geom_hline(
+          yintercept = hline,
+          linetype = "dashed",
+          color = "grey40",
+          linewidth = 0.7
+        ) +
+        annotate(
+          "text",
+          x = min(d[[x_var]], na.rm = TRUE),
+          y = hline + 0.02,
+          label = hline_label,
+          hjust = 0,
+          size = 3.2,
+          color = "grey40"
         )
-      )
-  })
+    }
+
+    p <- p +
+      geom_line(linewidth = 0.9) +
+      geom_point(size = 2.5) +
+      scale_color_manual(
+        values = c("Post-only" = "#1f77b4", "Panel" = "#d62728"),
+        name = "WP3 community design"
+      ) +
+      scale_linetype_manual(
+        values = c("Post-only" = "solid", "Panel" = "dashed"),
+        name = "WP3 community design"
+      ) +
+      scale_shape_manual(
+        values = c("Post-only" = 16L, "Panel" = 17L),
+        name = "WP3 community design"
+      ) +
+      labs(
+        x = WP3_COMMUNITY_EFFECT_X_LABELS[[x_var]],
+        y = y_label,
+        title = paste(
+          title_prefix,
+          WP3_COMMUNITY_EFFECT_LABELS[[effect_term]]
+        ),
+        subtitle = filter_subtitle(fv, input)
+      ) +
+      base_theme()
+
+    if (!is.null(y_limits) || percent_y) {
+      p <- p +
+        scale_y_continuous(
+          labels = if (percent_y) percent_format(accuracy = 1) else waiver()
+        )
+    }
+    if (!is.null(y_limits)) {
+      p <- p + coord_cartesian(ylim = y_limits)
+    }
+
+    if (fv != x_var && fv %in% community_facet_vars) {
+      add_facet(p, fv)
+    } else {
+      p
+    }
+  }
+
+  register_wp3_community_effect_plots <- function(
+    prefix,
+    y_var,
+    y_label,
+    title_prefix,
+    hline = NULL,
+    hline_label = NULL,
+    y_limits = NULL,
+    percent_y = FALSE
+  ) {
+    for (effect_term in WP3_COMMUNITY_EFFECT_ORDER) {
+      local({
+        effect_local <- effect_term
+        output[[effect_output_id(prefix, effect_local)]] <- renderPlot({
+          wp3_community_effect_plot(
+            effect_term = effect_local,
+            y_var = y_var,
+            y_label = y_label,
+            title_prefix = title_prefix,
+            hline = hline,
+            hline_label = hline_label,
+            y_limits = y_limits,
+            percent_y = percent_y
+          )
+        })
+      })
+    }
+  }
+
+  register_wp3_community_effect_plots(
+    "community_power",
+    "power",
+    "Power",
+    "Power:",
+    hline = 0.80,
+    hline_label = "80% target",
+    y_limits = c(0, 1),
+    percent_y = TRUE
+  )
+  register_wp3_community_effect_plots(
+    "community_coverage",
+    "coverage",
+    "95% CI coverage",
+    "Coverage:",
+    hline = 0.95,
+    hline_label = "95%",
+    y_limits = c(0.80, 1),
+    percent_y = TRUE
+  )
+  register_wp3_community_effect_plots(
+    "community_bias",
+    "bias",
+    "Bias (estimate - estimand)",
+    "Bias:",
+    hline = 0
+  )
+  register_wp3_community_effect_plots(
+    "community_rmse",
+    "rmse",
+    "RMSE",
+    "RMSE:"
+  )
 
   # ── Custom simulation ─────────────────────────────────────────────────────
 
   custom_results <- eventReactive(input$run_custom, {
     req(length(input$custom_designs) > 0)
 
-    n_designs <- length(input$custom_designs)
+    selected_design_types <- custom_design_types_from_inputs(
+      input$custom_designs
+    )
+    req(length(selected_design_types) > 0)
+
+    n_designs <- length(selected_design_types)
 
     withProgress(
       message = paste0(
@@ -2138,22 +2754,24 @@ server <- function(input, output, session) {
       ),
       value = 0,
       {
-        results_list <- lapply(seq_along(input$custom_designs), function(i) {
-          dtype <- input$custom_designs[[i]]
+        results_list <- lapply(seq_along(selected_design_types), function(i) {
+          dtype <- selected_design_types[[i]]
           dlabel <- DESIGN_LABEL_LOOKUP[[dtype]]
           incProgress(
             amount = 0.1,
             detail = paste("Building:", dlabel)
           )
-          d <- build_wp2_design(
+          d <- build_wp3_community_design(
             N = input$custom_N,
+            J = input$custom_J,
+            p_comm_flooded = input$custom_p_comm_flooded,
+            p_indiv_given_comm = input$custom_p_indiv,
             tau = input$custom_tau,
-            tau_flood = input$custom_tau_flood,
-            tau_interaction = input$custom_tau_interaction,
+            tau_community = input$custom_tau_community,
+            tau_individual = input$custom_tau_individual,
             rho_y = input$custom_rho,
             attrition_rate = input$custom_attr,
             differential_attrition = input$custom_diff,
-            flood_exposure_rate = input$custom_flood_rate,
             treat_prob = input$custom_treat_prob,
             flood_response_boost = input$custom_flood_boost,
             type = dtype
@@ -2182,10 +2800,15 @@ server <- function(input, output, session) {
               rho_y = input$custom_rho,
               attrition_rate = input$custom_attr,
               differential_attrition = input$custom_diff,
-              flood_exposure_rate = input$custom_flood_rate,
+              flood_exposure_rate = NA_real_,
               treat_prob = input$custom_treat_prob,
-              tau_flood = input$custom_tau_flood,
-              tau_interaction = input$custom_tau_interaction,
+              tau_flood = NA_real_,
+              tau_interaction = NA_real_,
+              J = input$custom_J,
+              p_comm_flooded = input$custom_p_comm_flooded,
+              p_indiv_given_comm = input$custom_p_indiv,
+              tau_community = input$custom_tau_community,
+              tau_individual = input$custom_tau_individual,
               flood_response_boost = input$custom_flood_boost,
               design_type = dtype,
               design_label_display = dlabel,
@@ -2247,22 +2870,34 @@ server <- function(input, output, session) {
       r <- custom_results()
       simulation_id <- attr(r, "simulation_id")
       csv_file <- attr(r, "csv_file")
+      first_non_na <- function(col) {
+        vals <- unique(stats::na.omit(r[[col]]))
+        if (length(vals) == 0) {
+          return(NA_real_)
+        }
+        vals[1]
+      }
       params <- sprintf(
         paste0(
-          "N = %d, tau = %.2f, tau_flood = %.2f, tau_interaction = %.2f, ",
+          "N = %d, tau_survey = %.2f, ",
           "rho = %.2f, attrition = %.0f%%, diff. attrition = %.2f, ",
-          "flood_rate = %.2f, survey_assignment_prob = %.2f, flood_retention_boost = %.2f, sims = %d"
+          "survey_assignment_prob = %.2f, ",
+          "J = %.0f, p_comm_flooded = %.2f, p_indiv = %.2f, ",
+          "tau_community = %.2f, tau_individual = %.2f, ",
+          "flood_retention_boost = %.2f, sims = %d"
         ),
-        unique(r$N),
-        unique(r$tau),
-        unique(r$tau_flood),
-        unique(r$tau_interaction),
-        unique(r$rho_y),
-        100 * unique(r$attrition_rate),
-        unique(r$differential_attrition),
-        unique(r$flood_exposure_rate),
-        unique(r$treat_prob),
-        unique(r$flood_response_boost),
+        first_non_na("N"),
+        first_non_na("tau"),
+        first_non_na("rho_y"),
+        100 * first_non_na("attrition_rate"),
+        first_non_na("differential_attrition"),
+        first_non_na("treat_prob"),
+        first_non_na("J"),
+        first_non_na("p_comm_flooded"),
+        first_non_na("p_indiv_given_comm"),
+        first_non_na("tau_community"),
+        first_non_na("tau_individual"),
+        first_non_na("flood_response_boost"),
         input$custom_sims
       )
       div(
@@ -2278,32 +2913,44 @@ server <- function(input, output, session) {
     }
   })
 
-  custom_wp3_effect_data <- function(effect_term) {
+  custom_wp3_community_effect_data <- function(effect_term) {
     r <- custom_results()
     req(!is.null(r))
 
     r |>
       filter(
         outcome_scale == "Latent SD",
-        design_type %in% c("wp3_post_only", "wp3_panel"),
+        design_type %in%
+          c("wp3_community_post_only", "wp3_community_panel"),
         term == effect_term
       ) |>
       mutate(
         design_variant = dplyr::recode(
           design_type,
-          wp3_post_only = "Post-only",
-          wp3_panel = "Panel"
+          wp3_community_post_only = "Post-only",
+          wp3_community_panel = "Panel"
         )
       )
   }
 
-  custom_wp3_effect_plot <- function(effect_term, y_var, y_label, title_prefix,
-                                     hline = NULL, hline_label = NULL,
-                                     y_limits = NULL, percent_y = FALSE) {
-    d <- custom_wp3_effect_data(effect_term)
+  custom_wp3_community_effect_plot <- function(
+    effect_term,
+    y_var,
+    y_label,
+    title_prefix,
+    hline = NULL,
+    hline_label = NULL,
+    y_limits = NULL,
+    percent_y = FALSE
+  ) {
+    d <- custom_wp3_community_effect_data(effect_term)
     if (nrow(d) == 0) {
       plot.new()
-      text(0.5, 0.5, "Run at least one WP3 design to show this effect.")
+      text(
+        0.5,
+        0.5,
+        "Run at least one community WP3 design to show this effect."
+      )
       return(invisible(NULL))
     }
 
@@ -2325,15 +2972,16 @@ server <- function(input, output, session) {
           linewidth = 0.7
         )
       if (!is.null(hline_label)) {
-        p <- p + annotate(
-          "text",
-          x = d$design_variant[1],
-          y = hline + 0.02,
-          label = hline_label,
-          hjust = 0,
-          size = 3.2,
-          color = "grey40"
-        )
+        p <- p +
+          annotate(
+            "text",
+            x = d$design_variant[1],
+            y = hline + 0.02,
+            label = hline_label,
+            hjust = 0,
+            size = 3.2,
+            color = "grey40"
+          )
       }
     }
 
@@ -2341,19 +2989,23 @@ server <- function(input, output, session) {
       geom_col(alpha = 0.86, width = 0.62) +
       scale_fill_manual(
         values = c("Post-only" = "#1f77b4", "Panel" = "#d62728"),
-        name = "WP3 design"
+        name = "WP3 community design"
       ) +
       labs(
         x = NULL,
         y = y_label,
-        title = paste(title_prefix, WP3_EFFECT_LABELS[[effect_term]])
+        title = paste(
+          title_prefix,
+          WP3_COMMUNITY_EFFECT_LABELS[[effect_term]]
+        )
       ) +
       base_theme()
 
     if (!is.null(y_limits) || percent_y) {
-      p <- p + scale_y_continuous(
-        labels = if (percent_y) percent_format(accuracy = 1) else waiver()
-      )
+      p <- p +
+        scale_y_continuous(
+          labels = if (percent_y) percent_format(accuracy = 1) else waiver()
+        )
     }
     if (!is.null(y_limits)) {
       p <- p + coord_cartesian(ylim = y_limits)
@@ -2362,16 +3014,21 @@ server <- function(input, output, session) {
     p
   }
 
-  register_custom_wp3_effect_plots <- function(prefix, y_var, y_label,
-                                               title_prefix, hline = NULL,
-                                               hline_label = NULL,
-                                               y_limits = NULL,
-                                               percent_y = FALSE) {
-    for (effect_term in WP3_EFFECT_ORDER) {
+  register_custom_wp3_community_effect_plots <- function(
+    prefix,
+    y_var,
+    y_label,
+    title_prefix,
+    hline = NULL,
+    hline_label = NULL,
+    y_limits = NULL,
+    percent_y = FALSE
+  ) {
+    for (effect_term in WP3_COMMUNITY_EFFECT_ORDER) {
       local({
         effect_local <- effect_term
-        output[[paste0(prefix, "_", effect_local)]] <- renderPlot({
-          custom_wp3_effect_plot(
+        output[[effect_output_id(prefix, effect_local)]] <- renderPlot({
+          custom_wp3_community_effect_plot(
             effect_term = effect_local,
             y_var = y_var,
             y_label = y_label,
@@ -2386,22 +3043,38 @@ server <- function(input, output, session) {
     }
   }
 
-  register_custom_wp3_effect_plots(
-    "custom_power", "power", "Power", "Power:",
-    hline = 0.80, hline_label = "80% target",
-    y_limits = c(0, 1), percent_y = TRUE
+  register_custom_wp3_community_effect_plots(
+    "custom_community_power",
+    "power",
+    "Power",
+    "Power:",
+    hline = 0.80,
+    hline_label = "80% target",
+    y_limits = c(0, 1),
+    percent_y = TRUE
   )
-  register_custom_wp3_effect_plots(
-    "custom_coverage", "coverage", "95% CI coverage", "Coverage:",
-    hline = 0.95, hline_label = "95%",
-    y_limits = c(0.80, 1), percent_y = TRUE
+  register_custom_wp3_community_effect_plots(
+    "custom_community_coverage",
+    "coverage",
+    "95% CI coverage",
+    "Coverage:",
+    hline = 0.95,
+    hline_label = "95%",
+    y_limits = c(0.80, 1),
+    percent_y = TRUE
   )
-  register_custom_wp3_effect_plots(
-    "custom_bias", "bias", "Bias (estimate - estimand)", "Bias:",
+  register_custom_wp3_community_effect_plots(
+    "custom_community_bias",
+    "bias",
+    "Bias (estimate - estimand)",
+    "Bias:",
     hline = 0
   )
-  register_custom_wp3_effect_plots(
-    "custom_rmse", "rmse", "RMSE", "RMSE:"
+  register_custom_wp3_community_effect_plots(
+    "custom_community_rmse",
+    "rmse",
+    "RMSE",
+    "RMSE:"
   )
 
   output$custom_memory_status <- renderUI({
@@ -2445,23 +3118,23 @@ server <- function(input, output, session) {
         "Design type" = design_type,
         "N" = N,
         "tau" = tau,
-        "Flood effect" = tau_flood,
-        "Interaction" = tau_interaction,
+        "J" = J,
+        "Flooded community share" = p_comm_flooded,
+        "Individual flooding rate" = p_indiv_given_comm,
+        "Community flooding effect" = tau_community,
+        "Individual flooding effect" = tau_individual,
         "rho" = rho_y,
         "Attrition" = attrition_rate,
         "Survey retention penalty" = differential_attrition,
-        "Flood rate" = flood_exposure_rate,
         "Survey assignment prob" = treat_prob,
         "Flood retention boost" = flood_response_boost,
         "Sims" = sims,
-        "Power: avg survey" = power_survey_avg,
-        "Power: avg flood" = power_flood_avg,
-        "Power: survey not flooded" = power_survey_when_not_flooded,
-        "Power: survey flooded" = power_survey_when_flooded,
-        "Power: flood under survey control" = power_flood_when_survey_control,
-        "Power: flood under survey treatment" = power_flood_when_survey_treated,
-        "Power: survey contrast" = power_survey_flood_contrast,
-        "Power: flood contrast" = power_flood_survey_contrast
+        "Power: survey" = power_Z,
+        "Power: community flooding" = power_community_flooded,
+        "Power: individual flooding" = power_individual_flooded,
+        "Power: total direct damage" = power_total_direct_effect_latent,
+        "Power: survey x community" = `power_Z:community_flooded`,
+        "Power: survey x individual" = `power_Z:individual_flooded`
       )
 
     datatable(
@@ -2480,22 +3153,22 @@ server <- function(input, output, session) {
       formatRound(
         c(
           "tau",
-          "Flood effect",
-          "Interaction",
+          "J",
+          "Flooded community share",
+          "Individual flooding rate",
+          "Community flooding effect",
+          "Individual flooding effect",
           "rho",
           "Attrition",
           "Survey retention penalty",
-          "Flood rate",
           "Survey assignment prob",
           "Flood retention boost",
-          "Power: avg survey",
-          "Power: avg flood",
-          "Power: survey not flooded",
-          "Power: survey flooded",
-          "Power: flood under survey control",
-          "Power: flood under survey treatment",
-          "Power: survey contrast",
-          "Power: flood contrast"
+          "Power: survey",
+          "Power: community flooding",
+          "Power: individual flooding",
+          "Power: total direct damage",
+          "Power: survey x community",
+          "Power: survey x individual"
         ),
         digits = 3
       )
@@ -2513,12 +3186,14 @@ server <- function(input, output, session) {
         outcome_scale,
         N,
         tau,
-        tau_flood,
-        tau_interaction,
+        J,
+        p_comm_flooded,
+        p_indiv_given_comm,
+        tau_community,
+        tau_individual,
         rho_y,
         attrition_rate,
         differential_attrition,
-        flood_exposure_rate,
         treat_prob,
         flood_response_boost,
         power,
@@ -2538,12 +3213,14 @@ server <- function(input, output, session) {
         "Scale" = outcome_scale,
         "N" = N,
         "tau (SD)" = tau,
-        "Flood effect" = tau_flood,
-        "Interaction" = tau_interaction,
+        "J" = J,
+        "Flooded community share" = p_comm_flooded,
+        "Individual flooding rate" = p_indiv_given_comm,
+        "Community flooding effect" = tau_community,
+        "Individual flooding effect" = tau_individual,
         "rho" = rho_y,
         "Attrition" = attrition_rate,
         "Survey retention penalty" = differential_attrition,
-        "Flood rate" = flood_exposure_rate,
         "Survey assignment prob" = treat_prob,
         "Flood retention boost" = flood_response_boost,
         "Power" = power,

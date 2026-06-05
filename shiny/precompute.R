@@ -17,49 +17,57 @@ set.seed(20260413)
 # PARAMETER GRIDS - edit here to expand coverage
 # ============================================================================
 
-# Core grids shared by WP2 and WP3
+# Core grids shared by WP2 and WP3.
+# Runtime profile: reduced pilot grid for a 30-45 minute precompute pass.
 N_grid <- c(2000, 4000, 6000)
 # ## ADD: e.g. 1000, 3000, 5000 to fill gaps or extend range
 
-tau_grid_wp2 <- c(0.05, 0.10, 0.20, 0.30)
+tau_grid_wp2 <- c(0.10, 0.20)
 # ## ADD: e.g. 0.08, 0.35, 0.40
 
 # Keep WP3 survey-effect grid leaner by default for runtime.
-tau_grid_wp3 <- c(0.05, 0.10, 0.20)
+tau_grid_wp3 <- c(0.10, 0.20)
 # ## ADD/RAISE: e.g. include 0.25, 0.30 for wider WP3 effect-size coverage
 
-rho_grid <- c(0.20, 0.60)
+rho_grid <- c(0.40, 0.60, 0.80)
 # ## ADD: e.g. 0.10, 0.30, 0.50, 0.70
 
 # WP2 attrition grids
-attrition_grid <- c(0.10, 0.30, 0.50)
-differential_attrition_grid <- c(0.00, 0.10)
+attrition_grid <- c(0.1, 0.3, 0.5)
+differential_attrition_grid <- c(0.00)
 
 # WP3 natural experiment grids
 flood_exposure_grid <- c(0.10, 0.20)
 # Share of respondents exposed to flood event between waves.
 
-treat_prob_grid <- c(0.50, 0.65)
+treat_prob_grid <- c(0.50)
 # Uneven assignment can increase precision for some estimands.
 
-tau_flood_grid <- c(-0.10, -0.075, -0.05)
+tau_flood_grid <- c(-0.10, -0.2)
 # Main effect of flood exposure on latent outcome.
 
-tau_interaction_grid <- c(-0.08, 0.08)
+tau_interaction_grid <- c(-0.1, 0.1)
 # Interaction of survey experiment assignment and flood exposure (both signs).
 
-flood_response_boost_grid <- c(0.00)
+flood_response_boost_grid <- c(0.00, 0.1)
 # Flood-exposure effect on follow-up retention, in log-odds units.
 # Positive values increase follow-up response among flood-exposed; negative
 # values reduce it.
 
+# WP3 community design grids
+J_grid <- c(300, 600, 1200)
+p_comm_flooded_grid <- c(0.10, 0.20, 0.4)
+p_indiv_grid <- c(0.1, 0.3)
+tau_community_grid <- c(-0.10, -0.2)
+tau_individual_grid <- c(-0.1, -0.2)
+
 # Keep WP3 panel attrition assumptions fixed by default for runtime,
 # but keep as vectors so this is easy to customize later.
-wp3_attrition_grid <- c(0.30)
+wp3_attrition_grid <- c(0.1, 0.3, 0.5)
 wp3_differential_attrition_grid <- c(0.00)
 
 # Simulations per design cell.
-sims_precompute <- 200
+sims_precompute <- 500
 # ## RAISE: to 500 or 1000 for final run
 
 # -- Parallel setup -----------------------------------------------------------
@@ -134,24 +142,59 @@ grid_wp3_panel <- expand.grid(
   stringsAsFactors = FALSE
 )
 
+grid_wp3_community_post <- expand.grid(
+  N = N_grid,
+  J = J_grid,
+  tau = tau_grid_wp3,
+  rho_y = rho_grid,
+  p_comm_flooded = p_comm_flooded_grid,
+  p_indiv_given_comm = p_indiv_grid,
+  tau_community = tau_community_grid,
+  tau_individual = tau_individual_grid,
+  treat_prob = treat_prob_grid,
+  stringsAsFactors = FALSE
+)
+
+grid_wp3_community_panel <- expand.grid(
+  N = N_grid,
+  J = J_grid,
+  tau = tau_grid_wp3,
+  rho_y = rho_grid,
+  p_comm_flooded = p_comm_flooded_grid,
+  p_indiv_given_comm = p_indiv_grid,
+  tau_community = tau_community_grid,
+  tau_individual = tau_individual_grid,
+  treat_prob = treat_prob_grid,
+  attrition_rate = wp3_attrition_grid,
+  differential_attrition = wp3_differential_attrition_grid,
+  flood_response_boost = flood_response_boost_grid,
+  stringsAsFactors = FALSE
+)
+
 total_cells <- nrow(grid_wp2_post) +
   nrow(grid_wp2_panel) +
   nrow(grid_wp3_post) +
-  nrow(grid_wp3_panel)
+  nrow(grid_wp3_panel) +
+  nrow(grid_wp3_community_post) +
+  nrow(grid_wp3_community_panel)
 
 message(sprintf(
   paste0(
     "\nGrid summary",
-    "\n  WP2 post-only : %d cells",
-    "\n  WP2 panel     : %d cells",
-    "\n  WP3 post-only : %d cells",
-    "\n  WP3 panel     : %d cells",
-    "\n  Total         : %d cells x %d sims = %s simulations\n"
+    "\n  WP2 post-only       : %d cells",
+    "\n  WP2 panel           : %d cells",
+    "\n  WP3 post-only       : %d cells",
+    "\n  WP3 panel           : %d cells",
+    "\n  WP3 community post  : %d cells",
+    "\n  WP3 community panel : %d cells",
+    "\n  Total               : %d cells x %d sims = %s simulations\n"
   ),
   nrow(grid_wp2_post),
   nrow(grid_wp2_panel),
   nrow(grid_wp3_post),
   nrow(grid_wp3_panel),
+  nrow(grid_wp3_community_post),
+  nrow(grid_wp3_community_panel),
   total_cells,
   sims_precompute,
   format(total_cells * sims_precompute, big.mark = ",")
@@ -230,6 +273,60 @@ wp3_panel_designs <- lapply(seq_len(nrow(grid_wp3_panel)), function(i) {
 })
 names(wp3_panel_designs) <- paste0("wp3panel_", seq_len(nrow(grid_wp3_panel)))
 
+message("Building WP3 community post-only designs...")
+wp3_community_post_designs <- lapply(
+  seq_len(nrow(grid_wp3_community_post)),
+  function(i) {
+    build_wp3_community_design(
+      N = grid_wp3_community_post$N[i],
+      J = grid_wp3_community_post$J[i],
+      tau = grid_wp3_community_post$tau[i],
+      rho_y = grid_wp3_community_post$rho_y[i],
+      p_comm_flooded = grid_wp3_community_post$p_comm_flooded[i],
+      p_indiv_given_comm = grid_wp3_community_post$p_indiv_given_comm[i],
+      tau_community = grid_wp3_community_post$tau_community[i],
+      tau_individual = grid_wp3_community_post$tau_individual[i],
+      treat_prob = grid_wp3_community_post$treat_prob[i],
+      attrition_rate = 0.30,
+      differential_attrition = 0.00,
+      flood_response_boost = 0.00,
+      type = "wp3_community_post_only"
+    )
+  }
+)
+names(wp3_community_post_designs) <- paste0(
+  "wp3commpo_",
+  seq_len(nrow(grid_wp3_community_post))
+)
+
+message("Building WP3 community panel designs...")
+wp3_community_panel_designs <- lapply(
+  seq_len(nrow(grid_wp3_community_panel)),
+  function(i) {
+    build_wp3_community_design(
+      N = grid_wp3_community_panel$N[i],
+      J = grid_wp3_community_panel$J[i],
+      tau = grid_wp3_community_panel$tau[i],
+      rho_y = grid_wp3_community_panel$rho_y[i],
+      p_comm_flooded = grid_wp3_community_panel$p_comm_flooded[i],
+      p_indiv_given_comm = grid_wp3_community_panel$p_indiv_given_comm[i],
+      tau_community = grid_wp3_community_panel$tau_community[i],
+      tau_individual = grid_wp3_community_panel$tau_individual[i],
+      treat_prob = grid_wp3_community_panel$treat_prob[i],
+      attrition_rate = grid_wp3_community_panel$attrition_rate[i],
+      differential_attrition = grid_wp3_community_panel$differential_attrition[
+        i
+      ],
+      flood_response_boost = grid_wp3_community_panel$flood_response_boost[i],
+      type = "wp3_community_panel"
+    )
+  }
+)
+names(wp3_community_panel_designs) <- paste0(
+  "wp3commpanel_",
+  seq_len(nrow(grid_wp3_community_panel))
+)
+
 # -- Diagnose -----------------------------------------------------------------
 t0 <- proc.time()
 
@@ -268,6 +365,28 @@ diag_wp3_panel <- diagnose_designs(
   bootstrap_sims = FALSE
 )
 
+message(sprintf(
+  "Diagnosing WP3 community post-only (%d cells)...",
+  nrow(grid_wp3_community_post)
+))
+diag_wp3_community_post <- diagnose_designs(
+  wp3_community_post_designs,
+  diagnosands = diagnosands_power,
+  sims = sims_precompute,
+  bootstrap_sims = FALSE
+)
+
+message(sprintf(
+  "Diagnosing WP3 community panel (%d cells)...",
+  nrow(grid_wp3_community_panel)
+))
+diag_wp3_community_panel <- diagnose_designs(
+  wp3_community_panel_designs,
+  diagnosands = diagnosands_power,
+  sims = sims_precompute,
+  bootstrap_sims = FALSE
+)
+
 elapsed_min <- (proc.time() - t0)["elapsed"] / 60
 message(sprintf("\nDiagnosis complete in %.1f minutes.", elapsed_min))
 
@@ -291,7 +410,12 @@ results_wp2_post <- diag_wp2_post$diagnosands_df |>
         treat_prob = NA_real_,
         tau_flood = NA_real_,
         tau_interaction = NA_real_,
-        flood_response_boost = NA_real_
+        flood_response_boost = NA_real_,
+        J = NA_real_,
+        p_comm_flooded = NA_real_,
+        p_indiv_given_comm = NA_real_,
+        tau_community = NA_real_,
+        tau_individual = NA_real_
       ),
     by = "design_idx"
   )
@@ -309,7 +433,12 @@ results_wp2_panel <- diag_wp2_panel$diagnosands_df |>
         treat_prob = NA_real_,
         tau_flood = NA_real_,
         tau_interaction = NA_real_,
-        flood_response_boost = NA_real_
+        flood_response_boost = NA_real_,
+        J = NA_real_,
+        p_comm_flooded = NA_real_,
+        p_indiv_given_comm = NA_real_,
+        tau_community = NA_real_,
+        tau_individual = NA_real_
       ),
     by = "design_idx"
   )
@@ -325,7 +454,12 @@ results_wp3_post <- diag_wp3_post$diagnosands_df |>
         design_idx = row_number(),
         attrition_rate = NA_real_,
         differential_attrition = NA_real_,
-        flood_response_boost = NA_real_
+        flood_response_boost = NA_real_,
+        J = NA_real_,
+        p_comm_flooded = NA_real_,
+        p_indiv_given_comm = NA_real_,
+        tau_community = NA_real_,
+        tau_individual = NA_real_
       ),
     by = "design_idx"
   )
@@ -337,7 +471,49 @@ results_wp3_panel <- diag_wp3_panel$diagnosands_df |>
   ) |>
   left_join(
     grid_wp3_panel |>
-      mutate(design_idx = row_number()),
+      mutate(
+        design_idx = row_number(),
+        J = NA_real_,
+        p_comm_flooded = NA_real_,
+        p_indiv_given_comm = NA_real_,
+        tau_community = NA_real_,
+        tau_individual = NA_real_
+      ),
+    by = "design_idx"
+  )
+
+results_wp3_community_post <- diag_wp3_community_post$diagnosands_df |>
+  mutate(
+    design_idx = parse_idx(design, "wp3commpo_"),
+    design_type = "wp3_community_post_only"
+  ) |>
+  left_join(
+    grid_wp3_community_post |>
+      mutate(
+        design_idx = row_number(),
+        attrition_rate = NA_real_,
+        differential_attrition = NA_real_,
+        flood_exposure_rate = NA_real_,
+        tau_flood = NA_real_,
+        tau_interaction = NA_real_,
+        flood_response_boost = NA_real_
+      ),
+    by = "design_idx"
+  )
+
+results_wp3_community_panel <- diag_wp3_community_panel$diagnosands_df |>
+  mutate(
+    design_idx = parse_idx(design, "wp3commpanel_"),
+    design_type = "wp3_community_panel"
+  ) |>
+  left_join(
+    grid_wp3_community_panel |>
+      mutate(
+        design_idx = row_number(),
+        flood_exposure_rate = NA_real_,
+        tau_flood = NA_real_,
+        tau_interaction = NA_real_
+      ),
     by = "design_idx"
   )
 
@@ -350,7 +526,9 @@ results <- bind_rows(
   results_wp2_post,
   results_wp2_panel,
   results_wp3_post,
-  results_wp3_panel
+  results_wp3_panel,
+  results_wp3_community_post,
+  results_wp3_community_panel
 ) |>
   select(-design_idx) |>
   mutate(
@@ -378,6 +556,11 @@ attr(results, "grid_meta") <- list(
   tau_flood_grid = tau_flood_grid,
   tau_interaction_grid = tau_interaction_grid,
   flood_response_boost_grid = flood_response_boost_grid,
+  J_grid = J_grid,
+  p_comm_flooded_grid = p_comm_flooded_grid,
+  p_indiv_grid = p_indiv_grid,
+  tau_community_grid = tau_community_grid,
+  tau_individual_grid = tau_individual_grid,
   wp3_attrition_grid = wp3_attrition_grid,
   wp3_differential_attrition_grid = wp3_differential_attrition_grid,
   sims = sims_precompute,
