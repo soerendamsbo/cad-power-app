@@ -12,6 +12,5 @@
 wp2_power_memo_cache/
 wp2_power_memo_files/
 
-shiny/results.rds
 shiny/quick_findings*/
 shiny/custom_simulation_memory/
